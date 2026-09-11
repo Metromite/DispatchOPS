@@ -1,0 +1,11 @@
+DispatchOPS Cloudflare Pages deployment
+
+"
+"Build command: npm run build
+"
+"Build output directory: dist
+"
+"Deploy command: npm run deploy
+"
+"Do NOT use: npx wrangler deploy
+"
