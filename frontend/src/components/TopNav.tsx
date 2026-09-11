@@ -98,7 +98,7 @@ export default function TopNav() {
         items={[
           {
             to: "/price-change",
-            label: "Price Changing",
+            label: "Price Change Portal",
             icon: <Tags className="h-4 w-4" />,
           },
         ]}
