@@ -53,22 +53,40 @@ export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],a
   const extFor=(type:string,path:string)=>{const m=(type||'').toLowerCase().split('/')[1];if(m==='jpeg')return 'jpg';if(m&&/^[a-z0-9]+$/.test(m))return m;const e=path.split('.').pop()?.toLowerCase();return e&&/^[a-z0-9]+$/.test(e)?e:'bin'};
   const safe=(x:string)=>x.replace(/[^a-z0-9._-]+/gi,'_').slice(0,80)||'attachment';
   const offlineRef=async(path:string,kind:'photo'|'signature')=>{
-    if(!path)return '';
-    if(attachmentCache.has(path))return attachmentCache.get(path)!;
+  if(!path)return '';
+  if(attachmentCache.has(path))return attachmentCache.get(path)!;
+
+  try{
     const url=await getEvidenceSignedUrl(path);
-    if(!url) return '';
+    if(!url) throw new Error('No signed evidence URL was returned');
+
     const res=await fetch(url);
-    if(!res.ok) throw new Error(`Could not download ${kind} attachment for offline Excel export`);
+    if(!res.ok) throw new Error(`Could not download ${kind} attachment`);
+
     const blob=await res.blob();
-    const raw=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=reject;r.readAsDataURL(blob)});
+    const raw=await new Promise<string>((resolve,reject)=>{
+      const r=new FileReader();
+      r.onload=()=>resolve(String(r.result||''));
+      r.onerror=reject;
+      r.readAsDataURL(blob);
+    });
+
     const b64=raw.replace(/^data:[^,]*,/,'');
     const base=kind==='photo'?'Photo':'Signature';
     const filename=`${base}_${attachments.length+1}_${safe(path.split('/').pop()||kind)}.${extFor(blob.type,path)}`;
+
     attachments.push({filename,base64_data:b64});
+
     const rel=`${attachmentFolder}/${filename}`;
     attachmentCache.set(path,rel);
     return rel;
-  };
+  }catch(error){
+    attachmentErrors.push(
+      `${kind}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return '';
+  }
+};
   for(const v of visits){
     const lineItems=(v.price_change_visit_items||[]);
     const assignment=assignmentMap.get(v.assignment_id||'');
@@ -107,7 +125,7 @@ export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],a
   }
   XLSX.utils.book_append_sheet(wb,ws,'Price Change Details');
   const result=await saveWorkbookWithOfflineAttachments(wb,filename,attachments);
-  return result;
+  return {   ...result,   attachment_warning: attachmentErrors.length     ? `${attachmentErrors.length} evidence attachment${attachmentErrors.length===1?' was':'s were'} unavailable; the Excel file was still saved.`     : '', };
 }
 
 export async function importPriceChangeWorkbook(file:File){
