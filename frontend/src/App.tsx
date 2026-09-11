@@ -77,8 +77,29 @@ function AuthGate({
 }: {
   children: ReactNode;
 }) {
-  const authenticated =
-    sessionStorage.getItem("dispatchops-auth") === "true";
+  const [authenticated, setAuthenticated] = useState(
+    () => sessionStorage.getItem("dispatchops-auth") === "true"
+  );
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setAuthenticated(
+        sessionStorage.getItem("dispatchops-auth") === "true"
+      );
+    };
+
+    window.addEventListener(
+      "dispatchops-auth-change",
+      handleAuthChange
+    );
+
+    return () => {
+      window.removeEventListener(
+        "dispatchops-auth-change",
+        handleAuthChange
+      );
+    };
+  }, []);
 
   if (!authenticated) {
     return <Login />;
