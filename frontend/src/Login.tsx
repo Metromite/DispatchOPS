@@ -36,37 +36,18 @@ export default function Login() {
 
     sessionStorage.setItem("dispatchops-auth", "true");
 
-window.dispatchEvent(
-  new Event("dispatchops-auth-change")
-);
+    window.dispatchEvent(
+      new Event("dispatchops-auth-change")
+    );
 
-if (remember) {
-      localStorage.setItem(
-        "dispatchops-remembered-username",
-        cleanUsername
-      );
-
-      localStorage.setItem(
-        "dispatchops-remembered-password",
-        password
-      );
-
-      localStorage.setItem(
-        "dispatchops-remember-me",
-        "true"
-      );
+    if (remember) {
+      localStorage.setItem("dispatchops-remembered-username", cleanUsername);
+      localStorage.setItem("dispatchops-remembered-password", password);
+      localStorage.setItem("dispatchops-remember-me", "true");
     } else {
-      localStorage.removeItem(
-        "dispatchops-remembered-username"
-      );
-
-      localStorage.removeItem(
-        "dispatchops-remembered-password"
-      );
-
-      localStorage.removeItem(
-        "dispatchops-remember-me"
-      );
+      localStorage.removeItem("dispatchops-remembered-username");
+      localStorage.removeItem("dispatchops-remembered-password");
+      localStorage.removeItem("dispatchops-remember-me");
     }
 
     navigate("/", { replace: true });
@@ -76,43 +57,25 @@ if (remember) {
     <main className="login-page">
       <section className="login-card glass-card">
         <div className="login-brand">
-          <img
-            src="/app-icon.png"
-            alt="Dispatch OPS"
-            className="login-logo"
-          />
-
+          <img src="/app-icon.png" alt="Dispatch OPS" className="login-logo" />
           <div>
-            <div className="login-brand-name">
-              DISPATCH OPS
-            </div>
-
-            <div className="login-brand-subtitle">
-              Operations Control Center
-            </div>
+            <div className="login-brand-name">DISPATCH OPS</div>
+            <div className="login-brand-subtitle">Operations Control Center</div>
           </div>
         </div>
 
-        <div className="login-title">
-          Sign in
-        </div>
-
-        <div className="login-subtitle">
-          Enter your Dispatch OPS credentials to continue.
-        </div>
+        <div className="login-title">Sign in</div>
+        <div className="login-subtitle">Enter your Dispatch OPS credentials to continue.</div>
 
         <form onSubmit={submit}>
           <label className="login-field">
             <span>Username</span>
-
             <input
               name="username"
               type="text"
               autoComplete="username"
               value={username}
-              onChange={(event) =>
-                setUsername(event.target.value)
-              }
+              onChange={(event) => setUsername(event.target.value)}
               placeholder="Username"
               autoFocus
             />
@@ -120,15 +83,12 @@ if (remember) {
 
           <label className="login-field">
             <span>Password</span>
-
             <input
               name="password"
               type="password"
               autoComplete="current-password"
               value={password}
-              onChange={(event) =>
-                setPassword(event.target.value)
-              }
+              onChange={(event) => setPassword(event.target.value)}
               placeholder="Password"
             />
           </label>
@@ -137,34 +97,20 @@ if (remember) {
             <input
               type="checkbox"
               checked={remember}
-              onChange={(event) =>
-                setRemember(event.target.checked)
-              }
+              onChange={(event) => setRemember(event.target.checked)}
             />
-
-            <span>
-              Remember me on this device
-            </span>
+            <span>Remember me on this device</span>
           </label>
 
-          {error && (
-            <div className="login-error">
-              {error}
-            </div>
-          )}
+          {error && <div className="login-error">{error}</div>}
 
-          <button
-            type="submit"
-            className="login-submit"
-          >
+          <button type="submit" className="login-submit">
             Sign in
           </button>
         </form>
 
         <div className="login-footer">
-          {resolvedTheme === "dark"
-            ? "Dark mode"
-            : "Light mode"}
+          {resolvedTheme === "dark" ? "Dark mode" : "Light mode"}
         </div>
       </section>
     </main>

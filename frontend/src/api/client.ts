@@ -1,17 +1,17 @@
-const AUTH_KEY = "dispatchops-auth";
-
-export function isAuthenticated(): boolean {
-  return sessionStorage.getItem(AUTH_KEY) === "true";
-}
+/**
+ * Small UI-session helpers retained for components that still ask about a
+ * local application role. DispatchOPS has no separate application server;
+ * operational data access lives in src/services and goes directly to Supabase.
+ */
 
 export function getRole(): string | null {
-  return isAuthenticated() ? "admin" : null;
+  return "admin";
 }
 
 export function logout(): void {
-  sessionStorage.removeItem(AUTH_KEY);
+  // No application-server session is stored.
 }
 
 export function isAuthEnabled(): boolean {
-  return true;
+  return false;
 }

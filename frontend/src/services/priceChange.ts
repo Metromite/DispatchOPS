@@ -38,7 +38,7 @@ export async function getPriceChangeEvidenceUrl(path?:string|null){return path?g
 export async function saveCampaignArea(x:{id?:string;campaign_id:string;area_name:string;sort_order?:number;active?:boolean}){return rpc<any>('dispatchops_price_change_admin_save_area',{p_key:await adminKey(),p_row:x});}
 export async function deleteCampaignArea(id:string){return rpc<boolean>('dispatchops_price_change_admin_delete_area',{p_key:await adminKey(),p_id:id});}
 
-export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],assignments:Assignment[],visits:Visit[],drivers:any[]=[]){
+export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],assignments:Assignment[],visits:Visit[],drivers:any[]=[],onProgress?:(p:{pct:number;status:string;message:string})=>void){
   const wb=XLSX.utils.book_new();
   const driverMap=new Map(drivers.map(d=>[d.id,`${d.code||''} — ${d.name||''}`]));
   const campaignMap=new Map(campaigns.map(c=>[c.id,c.title]));
@@ -47,46 +47,40 @@ export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],a
   const rows:any[]=[];
   const attachments:any[]=[];
   const attachmentErrors:string[]=[];
+  const totalEvidence=visits.reduce((n,v)=>n+(v.attachment_path?1:0)+(v.signature_path?1:0),0);
+  let completedEvidence=0;
+  onProgress?.({pct:5,status:'preparing',message:'Preparing Excel export…'});
   const filename=`DispatchOPS_Price_Change_${new Date().toISOString().slice(0,10)}.xlsx`;
   const attachmentFolder=`${filename.replace(/\.[^.]+$/,'')}_Attachments`;
   const attachmentCache=new Map<string,string>();
   const extFor=(type:string,path:string)=>{const m=(type||'').toLowerCase().split('/')[1];if(m==='jpeg')return 'jpg';if(m&&/^[a-z0-9]+$/.test(m))return m;const e=path.split('.').pop()?.toLowerCase();return e&&/^[a-z0-9]+$/.test(e)?e:'bin'};
   const safe=(x:string)=>x.replace(/[^a-z0-9._-]+/gi,'_').slice(0,80)||'attachment';
   const offlineRef=async(path:string,kind:'photo'|'signature')=>{
-  if(!path)return '';
-  if(attachmentCache.has(path))return attachmentCache.get(path)!;
-
-  try{
-    const url=await getEvidenceSignedUrl(path);
-    if(!url) throw new Error('No signed evidence URL was returned');
-
-    const res=await fetch(url);
-    if(!res.ok) throw new Error(`Could not download ${kind} attachment`);
-
-    const blob=await res.blob();
-    const raw=await new Promise<string>((resolve,reject)=>{
-      const r=new FileReader();
-      r.onload=()=>resolve(String(r.result||''));
-      r.onerror=reject;
-      r.readAsDataURL(blob);
-    });
-
-    const b64=raw.replace(/^data:[^,]*,/,'');
-    const base=kind==='photo'?'Photo':'Signature';
-    const filename=`${base}_${attachments.length+1}_${safe(path.split('/').pop()||kind)}.${extFor(blob.type,path)}`;
-
-    attachments.push({filename,base64_data:b64});
-
-    const rel=`${attachmentFolder}/${filename}`;
-    attachmentCache.set(path,rel);
-    return rel;
-  }catch(error){
-    attachmentErrors.push(
-      `${kind}: ${error instanceof Error ? error.message : String(error)}`
-    );
-    return '';
-  }
-};
+    if(!path)return '';
+    if(attachmentCache.has(path))return attachmentCache.get(path)!;
+    try{
+      const url=await getEvidenceSignedUrl(path);
+      if(!url) throw new Error('No signed evidence URL was returned');
+      const res=await fetch(url);
+      if(!res.ok) throw new Error(`Could not download ${kind} attachment`);
+      const blob=await res.blob();
+      const raw=await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=reject;r.readAsDataURL(blob)});
+      const b64=raw.replace(/^data:[^,]*,/,'');
+      const base=kind==='photo'?'Photo':'Signature';
+      const filename=`${base}_${attachments.length+1}_${safe(path.split('/').pop()||kind)}.${extFor(blob.type,path)}`;
+      attachments.push({filename,base64_data:b64});
+      const rel=`${attachmentFolder}/${filename}`;
+      attachmentCache.set(path,rel);
+      return rel;
+    }catch(error){
+      attachmentErrors.push(`${kind}: ${error instanceof Error ? error.message : String(error)}`);
+      return '';
+    }finally{
+      completedEvidence+=1;
+      const evidencePct=totalEvidence?Math.round(10+(completedEvidence/totalEvidence)*75):80;
+      onProgress?.({pct:evidencePct,status:'saving',message:totalEvidence?`Downloading evidence ${completedEvidence}/${totalEvidence}…`:'Preparing Excel workbook…'});
+    }
+  };
   for(const v of visits){
     const lineItems=(v.price_change_visit_items||[]);
     const assignment=assignmentMap.get(v.assignment_id||'');
@@ -124,8 +118,10 @@ export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],a
     if(sc&&ws[sc]?.v) ws[sc].v='Signature';
   }
   XLSX.utils.book_append_sheet(wb,ws,'Price Change Details');
+  onProgress?.({pct:88,status:'saving',message:`Saving Excel and ${attachments.length} evidence file${attachments.length===1?'':'s'}…`});
   const result=await saveWorkbookWithOfflineAttachments(wb,filename,attachments);
-  return {   ...result,   attachment_warning: attachmentErrors.length     ? `${attachmentErrors.length} evidence attachment${attachmentErrors.length===1?' was':'s were'} unavailable; the Excel file was still saved.`     : '', };
+  onProgress?.({pct:100,status:'success',message:`Download complete — ${attachments.length} evidence file${attachments.length===1?'':'s'} saved beside the Excel file.`});
+  return {...result,attachment_warning:attachmentErrors.length?`${attachmentErrors.length} evidence attachment${attachmentErrors.length===1?' was':'s were'} unavailable; the Excel file was still saved.`:''};
 }
 
 export async function importPriceChangeWorkbook(file:File){
