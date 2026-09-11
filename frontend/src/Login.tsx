@@ -36,7 +36,11 @@ export default function Login() {
 
     sessionStorage.setItem("dispatchops-auth", "true");
 
-    if (remember) {
+window.dispatchEvent(
+  new Event("dispatchops-auth-change")
+);
+
+if (remember) {
       localStorage.setItem(
         "dispatchops-remembered-username",
         cleanUsername
