@@ -1,17 +1,17 @@
-/**
- * Small UI-session helpers retained for components that still ask about a
- * local application role. DispatchOPS has no separate application server;
- * operational data access lives in src/services and goes directly to Supabase.
- */
+const AUTH_KEY = "dispatchops-auth";
+
+export function isAuthenticated(): boolean {
+  return sessionStorage.getItem(AUTH_KEY) === "true";
+}
 
 export function getRole(): string | null {
-  return "admin";
+  return isAuthenticated() ? "admin" : null;
 }
 
 export function logout(): void {
-  // No application-server session is stored.
+  sessionStorage.removeItem(AUTH_KEY);
 }
 
 export function isAuthEnabled(): boolean {
-  return false;
+  return true;
 }
