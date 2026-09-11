@@ -18,7 +18,7 @@ import ProtectedLayout from "./components/ProtectedLayout";
 import RoutePlanningToolbar from "./components/RoutePlanningToolbar";
 import SetupGate from "./components/SetupGate";
 
-import Login from "./pages/Login";
+import Login from "./Login";
 
 import { syncPrimaryConfigurationToSecondary } from "./lib/supabase";
 
