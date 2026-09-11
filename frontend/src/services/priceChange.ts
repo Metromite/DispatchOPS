@@ -46,6 +46,7 @@ export async function exportPriceChangeExcel(campaigns:Campaign[],items:Item[],a
   const assignmentMap=new Map(assignments.map(a=>[a.id,a]));
   const rows:any[]=[];
   const attachments:any[]=[];
+  const attachmentErrors:string[]=[];
   const filename=`DispatchOPS_Price_Change_${new Date().toISOString().slice(0,10)}.xlsx`;
   const attachmentFolder=`${filename.replace(/\.[^.]+$/,'')}_Attachments`;
   const attachmentCache=new Map<string,string>();
