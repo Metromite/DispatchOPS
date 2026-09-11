@@ -285,7 +285,39 @@ button.btn {
 button.btn:hover { background: var(--blue2); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
 button.btn:active { transform: scale(0.97) translateY(0); }
 button.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+/* Price Change Portal selectable surfaces keep normal text contrast in light mode. */
+.price-change-list-button,
+.price-change-driver-card {
+  background: var(--navy3) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  box-shadow: none;
+}
 
+.price-change-list-button:hover,
+.price-change-driver-card:hover {
+  background: var(--row-hover) !important;
+  border-color: var(--blue) !important;
+}
+
+.price-change-list-button.is-active,
+.price-change-driver-card.is-active {
+  background: var(--row-hover) !important;
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 22%, transparent);
+}
+
+.price-change-driver-card .muted {
+  color: var(--muted) !important;
+}
+
+/* Driver activity cards currently use inline translucent-white backgrounds. */
+[data-theme="light"] button.btn[style*="padding: 14px"] {
+  background: var(--navy3) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  box-shadow: none;
+}
 .badge {
   display: inline-block;
   padding: 4px 12px;
