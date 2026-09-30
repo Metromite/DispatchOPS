@@ -94,7 +94,22 @@ export async function reconstructRoute<T>(driver:string,date:string):Promise<T>{
 
 async function getFederatedExperienceRows():Promise<any[]>{
   const clients=getFederatedSupabaseClients();
-  const results=await Promise.all(clients.map(c=>{let q=c.from("experience_history").select("*").order("date",{ascending:false});return q;}));
+  // Supabase REST returns a maximum/default page (commonly 1,000 rows) when no
+  // range is supplied. Experience is accumulated across months, so reading only
+  // the first page makes older uploaded months disappear from Experience Summary
+  // even though the save succeeded. Read every page from every federated project.
+  const results=await Promise.all(clients.map(async c=>{
+    const rows:any[]=[];
+    const pageSize=1000;
+    for(let from=0;;from+=pageSize){
+      const {data,error}=await c.from("experience_history").select("*").order("date",{ascending:false}).range(from,from+pageSize-1);
+      if(error) throw error;
+      const page=data||[];
+      rows.push(...page);
+      if(page.length<pageSize) break;
+    }
+    return {data:rows,error:null};
+  }));
   const error=results.map(r=>r.error).find(Boolean); if(error) throw new Error(error.message);
   const seen=new Map<string,any>();
   for(const result of results) for(const r of result.data||[]){
