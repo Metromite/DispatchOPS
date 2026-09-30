@@ -383,14 +383,44 @@ export async function processExperienceExport(
   const payload=[...payloadByConflictKey.values()]; progress({current_step:"Saving unified daily Experience records",progress_pct:70,processed_units:payload.length,total_units:payload.length});
   for(let projectIndex=0;projectIndex<clients.length;projectIndex++){
     const client=clients[projectIndex];
-    for(let i=0;i<payload.length;i+=250){const batch=payload.slice(i,i+250);const {error}=await client.from("experience_history").upsert(batch,{onConflict:"experience_key"});if(error)throw new Error(`Experience save failed: ${error.message}`);}
-    // Re-merge the pre-upload history as a final guard against any backend rebuild
-    // or replace-style behavior. Distinct older months are always retained.
     const oldRows=existingExperienceByClient[projectIndex]||[];
-    for(let i=0;i<oldRows.length;i+=250){const batch=oldRows.slice(i,i+250);const {error}=await client.from("experience_history").upsert(batch,{onConflict:"experience_key"});if(error)throw new Error(`Experience history preservation failed: ${error.message}`);}
+    const merged=mergeExperienceRowsWithExisting(payload,oldRows);
+    for(let i=0;i<merged.length;i+=250){
+      const batch=merged.slice(i,i+250);
+      const {error}=await client.from("experience_history").upsert(batch,{onConflict:"id"});
+      if(error)throw new Error(`Experience save failed: ${error.message}`);
+    }
   }
   progress({status:"completed",current_step:"Experience upload complete",progress_pct:100,processed_units:payload.length,total_units:payload.length,log:`${payload.length} new/updated daily Experience records merged with the existing accumulated history. Older months were preserved.`});
   return {rows:payload.length,days:new Set(payload.map(x=>`${x.person_type}|${x.person_code}|${x.date}`)).size,people:new Set(payload.map(x=>`${x.person_type}|${x.person_code}`)).size};
+}
+
+function experienceStableKey(r:any): string {
+  return `${clean(r.person_code).toUpperCase()}|${clean(r.person_type).toUpperCase()}|${clean(r.date)}|${normalizeAreaKey(clean(r.area_code) && clean(r.area_code).toUpperCase()!=="UNKNOWN" ? r.area_code : r.area)}|${normalizeVehicle(r.vehicle_number)}`;
+}
+function experienceDailyKey(r:any): string {
+  return `${clean(r.person_code).toUpperCase()}|${clean(r.person_type).toUpperCase()}|${clean(r.date)}|${clean(r.area)}|${clean(r.vehicle_number)}`;
+}
+function mergeExperienceRowsWithExisting(incoming:any[], existing:any[]): any[] {
+  const byStable=new Map<string,any>(); const byDaily=new Map<string,any>();
+  for(const row of existing){
+    if(row?.id){
+      byStable.set(experienceStableKey(row),row);
+      byDaily.set(experienceDailyKey(row),row);
+    }
+  }
+  const seenStable=new Set<string>(); const seenDaily=new Set<string>(); const merged:any[]=[];
+  for(const row of incoming){
+    const stable=experienceStableKey(row); const daily=experienceDailyKey(row);
+    // Stable key is the canonical identity, while the daily key is the database's
+    // second unique constraint. Reuse an existing row id before upserting so neither
+    // unique index can be hit by an UPDATE/INSERT conflict.
+    const existingRow=byDaily.get(daily)||byStable.get(stable);
+    if(seenStable.has(stable) || seenDaily.has(daily)) continue;
+    seenStable.add(stable); seenDaily.add(daily);
+    merged.push(existingRow?.id ? {...row,id:existingRow.id} : row);
+  }
+  return merged;
 }
 
 function normalizeAreaKey(value: unknown): string { return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, ""); }
@@ -544,7 +574,19 @@ export async function importExperienceDataExport(file: File, onProgress?: (p: Im
   // on the canonical stored Area + Vehicle Number values.
   const dedupe=new Map<string,any>(); for(const r of payload){const k=`${clean(r.person_code).toUpperCase()}|${clean(r.person_type)}|${clean(r.date)}|${clean(r.area)}|${clean(r.vehicle_number)}`; const old=dedupe.get(k); if(old){old.order_count=Math.max(Number(old.order_count||0),Number(r.order_count||0));old.consumer_orders=Math.max(Number(old.consumer_orders||0),Number(r.consumer_orders||0));old.pharma_orders=Math.max(Number(old.pharma_orders||0),Number(r.pharma_orders||0));}else dedupe.set(k,r);}
   const cleanPayload=[...dedupe.values()]; progress({current_step:"Merging Experience without duplicates",progress_pct:70,processed_units:0,total_units:cleanPayload.length});
-  for(const c of clients) for(let i=0;i<cleanPayload.length;i+=250){const {error}=await c.from("experience_history").upsert(cleanPayload.slice(i,i+250),{onConflict:"experience_key"});if(error) throw new Error(`Experience backup import failed: ${error.message}`);}
+  for(const c of clients){
+    const existing:any[]=[]; const pageSize=1000;
+    for(let from=0;;from+=pageSize){
+      const {data,error}=await c.from("experience_history").select("*").range(from,from+pageSize-1);
+      if(error) throw new Error(`Experience history read failed: ${error.message}`);
+      const page=data||[]; existing.push(...page); if(page.length<pageSize) break;
+    }
+    const merged=mergeExperienceRowsWithExisting(cleanPayload,existing);
+    for(let i=0;i<merged.length;i+=250){
+      const {error}=await c.from("experience_history").upsert(merged.slice(i,i+250),{onConflict:"id"});
+      if(error) throw new Error(`Experience backup import failed: ${error.message}`);
+    }
+  }
   progress({status:"completed",current_step:"Experience backup import complete",progress_pct:100,processed_units:cleanPayload.length,total_units:cleanPayload.length,log:`${cleanPayload.length} records merged. ${skipped} records were skipped because the Driver/Helper code is not currently in the master.`});
   return {rows:cleanPayload.length,skipped_people:skipped};
 }
