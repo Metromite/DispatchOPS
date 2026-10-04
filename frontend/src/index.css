@@ -6916,3 +6916,884 @@ html[data-theme="dark"] .dashboard-loading-hint { background:rgba(66,137,255,.09
     transition: none !important;
   }
 }
+
+/* LOGI 2.1 — living glass/galaxy orb. Isolated to FloatingAiWidget only. */
+.logi-launcher {
+  --gaze-x: 0px;
+  --gaze-y: 0px;
+  position: relative;
+  width: 132px;
+  height: 132px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+.logi-launcher-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--blue) 42%, transparent), transparent 48%),
+    radial-gradient(circle, color-mix(in srgb, var(--cyan) 32%, transparent), transparent 70%);
+  filter: blur(18px);
+  opacity: .24;
+  transform: scale(.88);
+  transition: opacity .3s ease, transform .3s ease;
+  pointer-events: none;
+}
+.logi-launcher.is-active .logi-launcher-glow { opacity: .62; transform: scale(1.08); }
+.logi-launcher-orb,
+.logi-orb {
+  --orb-size: 116px;
+  position: relative;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 50%;
+  overflow: hidden;
+  flex: 0 0 auto;
+  background:
+    radial-gradient(circle at 35% 24%, color-mix(in srgb, var(--cyan) 28%, transparent), transparent 22%),
+    radial-gradient(circle at 62% 66%, color-mix(in srgb, var(--blue) 64%, transparent), transparent 58%),
+    radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--blue) 76%, var(--navy2)), var(--navy2) 74%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.30),
+    inset 12px 10px 24px rgba(255,255,255,.07),
+    inset -18px -18px 34px rgba(0,0,0,.20),
+    0 12px 28px color-mix(in srgb, var(--blue) 38%, transparent);
+  animation: logi-orb-breathe 5.6s ease-in-out infinite, logi-orb-drift 8.5s ease-in-out infinite;
+}
+.logi-launcher-orb { --orb-size: 116px; transition: transform .28s cubic-bezier(.16,1,.3,1), filter .28s ease; }
+.logi-launcher:hover .logi-launcher-orb {
+  transform: translateY(-3px) scale(1.06) rotate(.35deg);
+  filter: drop-shadow(0 16px 30px color-mix(in srgb, var(--blue) 52%, transparent));
+}
+.logi-orb-glass {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 28% 17%, rgba(255,255,255,.23), transparent 24%),
+    linear-gradient(135deg, rgba(255,255,255,.16), transparent 30%, transparent 68%, rgba(255,255,255,.06));
+  border: 1px solid rgba(255,255,255,.34);
+  pointer-events: none;
+}
+.logi-orb-glass::after {
+  content: "";
+  position: absolute;
+  left: 9%; top: 5%;
+  width: 45%; height: 25%;
+  border-radius: 50%;
+  background: rgba(255,255,255,.16);
+  filter: blur(9px);
+  transform: rotate(-24deg);
+}
+.logi-orb-galaxy {
+  position: absolute;
+  z-index: 1;
+  inset: -18%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 30% 38%, color-mix(in srgb, var(--cyan) 76%, transparent) 0 4%, transparent 20%),
+    radial-gradient(ellipse at 72% 60%, color-mix(in srgb, var(--blue2) 76%, transparent) 0 5%, transparent 23%),
+    radial-gradient(ellipse at 48% 72%, color-mix(in srgb, var(--blue) 72%, transparent) 0 7%, transparent 28%),
+    conic-gradient(from 20deg, transparent 0 13%, color-mix(in srgb, var(--cyan) 35%, transparent) 20%, transparent 31%, color-mix(in srgb, var(--blue2) 32%, transparent) 48%, transparent 63%, color-mix(in srgb, var(--cyan) 28%, transparent) 77%, transparent 90%);
+  filter: blur(5px) saturate(1.18);
+  opacity: .78;
+  transform: rotate(-14deg) scale(1.06);
+  animation: logi-galaxy-spin 13s linear infinite, logi-galaxy-breathe 7s ease-in-out infinite;
+}
+.logi-orb-galaxy-core {
+  position: absolute;
+  z-index: 2;
+  inset: 17%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 45% 42%, rgba(255,255,255,.12), transparent 10%),
+    radial-gradient(circle, color-mix(in srgb, var(--blue) 42%, transparent), transparent 62%);
+  filter: blur(4px);
+  opacity: .7;
+  animation: logi-core-pulse 5.8s ease-in-out infinite;
+}
+.logi-orb-ring {
+  position: absolute;
+  z-index: 3;
+  left: -8%; top: 32%;
+  width: 116%; height: 36%;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--cyan) 52%, transparent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--cyan) 28%, transparent);
+  pointer-events: none;
+}
+.logi-orb-ring-a { transform: rotate(-21deg); opacity: .58; animation: logi-ring-a 7.5s ease-in-out infinite; }
+.logi-orb-ring-b { transform: rotate(24deg) scaleY(.72); border-color: color-mix(in srgb, var(--blue2) 58%, transparent); opacity: .38; animation: logi-ring-b 9.4s ease-in-out infinite; }
+.logi-orb-energy {
+  position: absolute;
+  z-index: 4;
+  width: 130%; height: 30%; left: -15%;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--cyan) 48%, transparent);
+  filter: blur(.45px);
+  opacity: .28;
+  pointer-events: none;
+}
+.logi-orb-energy-a { top: 43%; transform: rotate(-18deg); animation: logi-orb-energy-a 6.8s ease-in-out infinite; }
+.logi-orb-energy-b { top: 48%; transform: rotate(20deg); border-color: color-mix(in srgb, var(--blue2) 58%, transparent); opacity: .24; animation: logi-orb-energy-b 8.2s ease-in-out infinite; }
+.logi-orb-stars {
+  position: absolute;
+  z-index: 5;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.72);
+  box-shadow:
+    18px 11px 0 rgba(255,255,255,.32),
+    -22px 26px 0 rgba(255,255,255,.38),
+    28px 37px 0 rgba(102,231,255,.54),
+    -30px 48px 0 rgba(255,255,255,.24),
+    9px 59px 0 rgba(108,160,255,.52);
+  opacity: .55;
+  filter: blur(.2px);
+  animation: logi-stars-drift 8s ease-in-out infinite;
+}
+.logi-orb-stars-a { left: 22%; top: 18%; }
+.logi-orb-stars-b { left: 62%; top: 48%; transform: scale(.72); opacity: .36; animation-delay: -3.2s; }
+.logi-orb-shimmer {
+  position: absolute;
+  z-index: 7;
+  width: 24%; height: 150%; top: -25%; left: -45%;
+  transform: rotate(26deg);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), color-mix(in srgb, var(--cyan) 32%, transparent), transparent);
+  filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  animation: logi-orb-shimmer 7.8s ease-in-out infinite;
+}
+.logi-orb-eyes {
+  position: absolute;
+  z-index: 10;
+  left: 0; right: 0; top: 24%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 19%;
+  pointer-events: none;
+}
+.logi-orb-eye {
+  width: 14.5%; height: 32%;
+  min-width: 7px; min-height: 13px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 9px rgba(255,255,255,.82), 0 0 20px color-mix(in srgb, var(--cyan) 60%, transparent);
+  transition: transform .18s cubic-bezier(.16,1,.3,1), height .16s ease;
+  transform-origin: center;
+}
+.logi-orb-eye-left { animation: logi-eye-life-left 10.8s ease-in-out infinite; }
+.logi-orb-eye-right { animation: logi-eye-life-right 13.6s ease-in-out infinite; animation-delay: -4.1s; }
+.logi-orb-logo-wrap {
+  position: absolute;
+  z-index: 9;
+  left: 10%; right: 10%; bottom: 5%; height: 43%;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+.logi-orb-logo {
+  width: 100%; height: 100%; object-fit: contain;
+  opacity: .9;
+  filter: brightness(1.35) saturate(1.18) drop-shadow(0 0 4px rgba(255,255,255,.25)) drop-shadow(0 0 10px color-mix(in srgb, var(--blue2) 46%, transparent));
+  transform: translateY(1px) scale(1.03);
+  animation: logi-logo-life 6.4s ease-in-out infinite;
+}
+.logi-launcher-orb .logi-orb-eye { transform: translate(var(--gaze-x), var(--gaze-y)); }
+.logi-launcher-orb .logi-orb-logo { animation-duration: 5.6s; }
+
+@keyframes logi-orb-breathe { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.014); } }
+@keyframes logi-orb-drift { 0%,100% { margin-left: 0; } 32% { margin-left: 1px; } 68% { margin-left: -1px; } }
+@keyframes logi-galaxy-spin { from { transform: rotate(-14deg) scale(1.06); } to { transform: rotate(346deg) scale(1.06); } }
+@keyframes logi-galaxy-breathe { 0%,100% { opacity: .64; } 50% { opacity: .9; } }
+@keyframes logi-core-pulse { 0%,100% { transform: scale(.94); opacity: .54; } 50% { transform: scale(1.05); opacity: .78; } }
+@keyframes logi-ring-a { 0%,100% { transform: translateX(-4%) rotate(-21deg) scaleX(.94); } 50% { transform: translateX(5%) rotate(-13deg) scaleX(1.06); } }
+@keyframes logi-ring-b { 0%,100% { transform: translateX(5%) rotate(24deg) scale(.72); } 50% { transform: translateX(-5%) rotate(31deg) scale(.78); } }
+@keyframes logi-orb-energy-a { 0%,100% { transform: translateX(-8%) rotate(-18deg) scaleX(.92); } 50% { transform: translateX(9%) rotate(-12deg) scaleX(1.06); } }
+@keyframes logi-orb-energy-b { 0%,100% { transform: translateX(8%) rotate(20deg) scaleX(1.02); } 50% { transform: translateX(-9%) rotate(27deg) scaleX(.92); } }
+@keyframes logi-stars-drift { 0%,100% { transform: translate3d(0,0,0) scale(.9); opacity: .3; } 50% { transform: translate3d(4px,-5px,0) scale(1.15); opacity: .72; } }
+@keyframes logi-orb-shimmer { 0%,58% { left: -45%; opacity: 0; } 66% { opacity: .48; } 82%,100% { left: 122%; opacity: 0; } }
+@keyframes logi-logo-life { 0%,62%,100% { opacity: .78; transform: translateY(1px) scale(1.02); } 69% { opacity: 1; transform: translateY(-1px) scale(1.05); } 77% { opacity: .86; transform: translateY(1px) scale(1.025); } }
+@keyframes logi-eye-life-left { 0%,34%,38%,100% { transform: translate(var(--gaze-x), var(--gaze-y)) scaleY(1); } 36% { transform: translate(var(--gaze-x), var(--gaze-y)) scaleY(.16); } 73%,78% { transform: translate(var(--gaze-x), var(--gaze-y)) scaleY(1); } }
+@keyframes logi-eye-life-right { 0%,48%,52%,100% { transform: translate(var(--gaze-x), var(--gaze-y)) scaleY(1); } 50% { transform: translate(var(--gaze-x), var(--gaze-y)) scaleY(.16); } }
+@media (prefers-reduced-motion: reduce) {
+  .logi-launcher-orb, .logi-orb-galaxy, .logi-orb-galaxy-core, .logi-orb-ring, .logi-orb-energy-a, .logi-orb-energy-b, .logi-orb-stars, .logi-orb-shimmer, .logi-orb-logo, .logi-orb-eye { animation: none !important; }
+}
+
+
+
+/* LOGI 2.5 — clean Spline mascot scene. Only FloatingAiWidget uses this. */
+.logi-bot-scene {
+  position: relative;
+  overflow: visible;
+  border-radius: 0;
+  isolation: isolate;
+  background: transparent !important;
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
+.logi-bot-scene > div,
+.logi-bot-scene > canvas,
+.logi-bot-scene > div > div,
+.logi-bot-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent !important;
+}
+.logi-bot-scene canvas { display: block; }
+.logi-bot-engraving {
+  position: absolute;
+  left: 50%;
+  top: 69%;
+  width: 30%;
+  height: 17%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 3;
+}
+.logi-bot-engraving::before,
+.logi-bot-engraving::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("/city-pharmacy-logi-mark.png") center / contain no-repeat;
+  pointer-events: none;
+}
+.logi-bot-engraving::before {
+  opacity: .16;
+  transform: translate(.7px, .8px);
+  filter: grayscale(1) contrast(.8) brightness(.55);
+}
+.logi-bot-engraving::after {
+  opacity: .18;
+  transform: translate(-.5px, -.5px);
+  filter: grayscale(1) contrast(.7) brightness(1.75);
+}
+.logi-bot-engraving img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  opacity: .22;
+  filter: grayscale(1) contrast(.75) brightness(1.15);
+  mix-blend-mode: multiply;
+}
+/* No orb, circular frame, artificial glow, or clipping around the 3D mascot. */
+.logi-launcher-orb {
+  --orb-size: 116px;
+  position: relative;
+  width: var(--orb-size);
+  height: var(--orb-size);
+  border-radius: 0;
+  overflow: visible;
+  flex: 0 0 auto;
+  background: transparent !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+.logi-launcher-glow { display: none !important; }
+.logi-launcher:hover .logi-launcher-orb {
+  transform: translateY(-2px) scale(1.03);
+  filter: drop-shadow(0 12px 22px color-mix(in srgb, var(--blue) 35%, transparent));
+}
+.logi-launcher-orb .logi-bot-scene {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* Do not cover or mask Spline's clean transparent scene with any HTML branding layer. */
+.logi-bot-scene [aria-label*="Spline" i],
+.logi-bot-scene [title*="Spline" i],
+.logi-bot-scene [class*="spline-logo" i],
+.logi-bot-scene [class*="spline-watermark" i] {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .logi-bot-scene { will-change: auto; }
+}
+
+/* LOGI 2.6 — floating mascot only: no company logo, no floor/messages, body locked. */
+.logi-bot-scene {
+  overflow: visible !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+.logi-bot-scene canvas,
+.logi-bot-scene > div,
+.logi-bot-scene > div > div {
+  background: transparent !important;
+  pointer-events: none !important;
+}
+.logi-bot-scene canvas { display: block; }
+.logi-bot-engraving { display: none !important; }
+.logi-launcher-orb {
+  width: 250px !important;
+  height: 250px !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.logi-launcher:hover .logi-launcher-orb {
+  transform: none !important;
+  filter: none !important;
+}
+.logi-launcher-glow { display: none !important; }
+
+
+/* LOGI 2.7 — fixed body + true full-page gaze. Isolated to LOGI only. */
+.logi-bot-scene,
+.logi-bot-scene canvas,
+.logi-bot-scene > div,
+.logi-bot-scene > div > div {
+  overflow: visible !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+}
+.logi-launcher,
+.logi-launcher-orb {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.logi-launcher:hover .logi-launcher-orb,
+.logi-launcher.is-active .logi-launcher-orb {
+  transform: none !important;
+  filter: none !important;
+}
+.logi-launcher-glow { display: none !important; }
+.logi-bot-scene [aria-label*="Spline" i],
+.logi-bot-scene [title*="Spline" i],
+.logi-bot-scene [class*="spline-logo" i],
+.logi-bot-scene [class*="spline-watermark" i],
+.logi-bot-scene [class*="spline-hint" i] {
+  display: none !important;
+}
+
+
+/* LOGI 2.8 — upright mascot orientation + actual robot scale + tight hover target. */
+.logi-launcher {
+  width: 210px !important;
+  height: 210px !important;
+}
+.logi-launcher-orb {
+  width: 210px !important;
+  height: 210px !important;
+  transform: none !important;
+}
+.logi-launcher:hover .logi-launcher-orb,
+.logi-launcher.is-active .logi-launcher-orb {
+  transform: none !important;
+  filter: none !important;
+}
+
+
+/* LOGI 2.9 — small placement/chat/avatar refinements only. */
+.logi-chat-bubble + * {
+  max-width: 100%;
+}
+
+/* LOGI 3.0 — precision geometry only. Keep the proven mascot untouched while
+   aligning the UI to the visible robot bounds instead of the transparent canvas. */
+.logi-chat-bubble {
+  position: relative;
+  z-index: 1;
+}
+.logi-bot-head-scene {
+  overflow: hidden !important;
+  flex: 0 0 auto;
+}
+.logi-bot-head-scene > div,
+.logi-bot-head-scene > canvas,
+.logi-bot-head-scene > div > div,
+.logi-bot-head-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+  transform: scale(1.45) !important;
+  transform-origin: 50% 50% !important;
+}
+.logi-bot-engraving {
+  position: absolute !important;
+  left: 50% !important;
+  top: 69% !important;
+  width: 27% !important;
+  height: 17% !important;
+  transform: translate(-50%, -50%) !important;
+  display: block !important;
+  pointer-events: none !important;
+  z-index: 8 !important;
+}
+.logi-bot-engraving::before,
+.logi-bot-engraving::after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  background: url("/logi-company-engraving.png") center / contain no-repeat !important;
+  pointer-events: none !important;
+}
+.logi-bot-engraving::before {
+  opacity: .22 !important;
+  transform: translate(.55px, .7px) !important;
+  filter: grayscale(1) contrast(1.25) brightness(.52) !important;
+  mix-blend-mode: multiply !important;
+}
+.logi-bot-engraving::after {
+  opacity: .34 !important;
+  transform: translate(-.45px, -.45px) !important;
+  filter: grayscale(1) contrast(.8) brightness(2.25) !important;
+  mix-blend-mode: screen !important;
+}
+.logi-bot-engraving img {
+  position: relative !important;
+  z-index: 2 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  display: block !important;
+  opacity: .13 !important;
+  filter: grayscale(1) contrast(1.2) brightness(.66) !important;
+  mix-blend-mode: multiply !important;
+}
+
+
+/* LOGI 3.1 — precise interaction/loading polish. The visual mascot stays unchanged. */
+.logi-launcher {
+  pointer-events: none !important;
+  cursor: default !important;
+  overflow: visible !important;
+}
+.logi-launcher-orb,
+.logi-launcher-glow,
+.logi-bot-engraving {
+  pointer-events: none !important;
+}
+.logi-click-target {
+  position: absolute !important;
+  left: 14% !important;
+  top: 9% !important;
+  width: 72% !important;
+  height: 87% !important;
+  z-index: 20 !important;
+  display: block !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  clip-path: polygon(
+    31% 0%, 69% 0%, 82% 8%, 88% 22%, 86% 42%,
+    93% 61%, 88% 80%, 80% 94%, 20% 94%, 12% 80%,
+    7% 61%, 14% 42%, 12% 22%, 18% 8%
+  ) !important;
+}
+.logi-click-target:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cyan) 70%, transparent) !important;
+  outline-offset: 3px !important;
+}
+.logi-hover-tip {
+  position: absolute !important;
+  right: 4px !important;
+  bottom: 188px !important;
+  z-index: 1305 !important;
+  padding: 9px 13px !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: var(--elevation-2) !important;
+  white-space: nowrap !important;
+  max-width: min(260px, calc(100vw - 24px)) !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+.logi-bot-engraving {
+  opacity: 0 !important;
+  transition: opacity .01s linear !important;
+}
+.logi-bot-engraving.is-ready {
+  opacity: 1 !important;
+}
+.logi-bot-head-scene {
+  overflow: hidden !important;
+  clip-path: inset(0) !important;
+}
+.logi-bot-head-scene > div,
+.logi-bot-head-scene > canvas,
+.logi-bot-head-scene > div > div,
+.logi-bot-head-scene canvas {
+  transform: scale(1.50) !important;
+  transform-origin: 50% 50% !important;
+}
+
+/* LOGI 3.2 — final visual alignment + imported 3D chat icon. */
+.logi-launcher:not(.is-ready) {
+  visibility: hidden !important;
+}
+
+/* Robot + engraved mark are revealed as one visual unit after the same Spline
+   readiness gate. Nothing from the mascot can paint before the robot is ready. */
+.logi-launcher.is-ready .logi-launcher-orb,
+.logi-launcher.is-ready .logi-bot-engraving {
+  visibility: visible !important;
+}
+
+.logi-hover-tip {
+  /* Anchor the bubble above the mascot's head, not over its face/body. */
+  right: 18px !important;
+  bottom: 216px !important;
+  transform-origin: 92% 100% !important;
+  animation: logiBubbleFromHead .22s cubic-bezier(.22,.8,.28,1) both !important;
+}
+.logi-hover-tip::after {
+  content: "" !important;
+  position: absolute !important;
+  right: 22px !important;
+  bottom: -6px !important;
+  width: 11px !important;
+  height: 11px !important;
+  background: inherit !important;
+  border-right: 1px solid var(--glass-border) !important;
+  border-bottom: 1px solid var(--glass-border) !important;
+  transform: rotate(45deg) !important;
+  border-radius: 0 0 3px 0 !important;
+}
+@keyframes logiBubbleFromHead {
+  from { opacity: 0; transform: translateY(7px) scale(.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* The attached Spline scene is the chat avatar itself — no HTML frame, orb,
+   white box, or head-only crop around it. */
+.logi-chat-3d-icon {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  pointer-events: none !important;
+}
+.logi-chat-3d-icon,
+.logi-chat-3d-icon > div,
+.logi-chat-3d-icon > canvas,
+.logi-chat-3d-icon > div > div,
+.logi-chat-3d-icon canvas {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+}
+.logi-chat-3d-icon canvas {
+  display: block !important;
+  transform: scale(1.08) !important;
+  transform-origin: 50% 50% !important;
+}
+
+/* LOGI 3.3 — measured startup/reveal + head-anchored greeting + full-size chat icon. */
+.logi-launcher:not(.is-ready) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.logi-launcher.is-ready {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+.logi-launcher.is-ready .logi-launcher-orb,
+.logi-launcher.is-ready .logi-bot-engraving {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* The mascot canvas is 210px, but the visible head sits slightly below its
+   upper edge. This anchor places the bubble just above that real head line,
+   rather than at the top of the transparent canvas. */
+.logi-hover-tip {
+  right: 16px !important;
+  bottom: 190px !important;
+  transform-origin: 92% 100% !important;
+}
+.logi-hover-tip::after {
+  right: 20px !important;
+  bottom: -6px !important;
+}
+
+/* Use the attached Spline scene as a genuine floating 3D icon, but do not let
+   its authored camera framing zoom the robot into the message bubble. */
+.logi-chat-3d-icon {
+  width: 72px !important;
+  height: 72px !important;
+  min-width: 72px !important;
+  min-height: 72px !important;
+  display: block !important;
+  flex: 0 0 72px !important;
+  overflow: visible !important;
+}
+.logi-chat-3d-icon canvas {
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  transform-origin: 50% 50% !important;
+  overflow: visible !important;
+}
+.logi-chat-3d-icon > div,
+.logi-chat-3d-icon > div > div {
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+}
+
+
+/* LOGI 3.4 — lightweight Siri-style liquid-glass AI orb for the chat.
+   Pure SVG/CSS: no Spline scene, no WebGL, no network asset, instant paint. */
+.logi-ai-orb {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  display: block !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  filter: drop-shadow(0 5px 12px rgba(49, 112, 255, .22));
+  transform: translateZ(0);
+}
+.logi-ai-orb-svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  overflow: visible !important;
+}
+.logi-ai-orb-halo {
+  fill: rgba(91, 181, 255, .10);
+  filter: blur(5px);
+  animation: logiOrbBreathe 3.4s ease-in-out infinite;
+}
+.logi-ai-orb-glass {
+  fill: rgba(255,255,255,.08);
+  stroke: rgba(255,255,255,.52);
+  stroke-width: .9;
+  filter: drop-shadow(0 0 4px rgba(123, 225, 255, .28));
+}
+.logi-ai-orb-core {
+  transform-origin: 50px 50px;
+  animation: logiOrbCore 4.8s ease-in-out infinite;
+}
+.logi-ai-orb-ring {
+  fill: none;
+  stroke: url(#logiOrbWave);
+  stroke-linecap: round;
+  opacity: .72;
+  transform-origin: 50px 50px;
+  filter: blur(.15px) drop-shadow(0 0 3px rgba(100, 190, 255, .42));
+}
+.logi-ai-orb-ring-a { stroke-width: 1.35; animation: logiOrbOrbitA 4.6s linear infinite; }
+.logi-ai-orb-ring-b { stroke-width: .85; opacity: .52; animation: logiOrbOrbitB 6.1s linear infinite reverse; }
+.logi-ai-orb-ring-c { stroke-width: .65; opacity: .42; animation: logiOrbOrbitC 3.8s ease-in-out infinite; }
+.logi-ai-orb-waves { transform-origin: 50px 50px; animation: logiOrbWaveFloat 3.6s ease-in-out infinite; }
+.logi-ai-orb .wave { vector-effect: non-scaling-stroke; }
+.wave-a { animation: logiOrbWaveA 2.9s ease-in-out infinite; }
+.wave-b { animation: logiOrbWaveB 2.3s ease-in-out infinite .15s; }
+.wave-c { animation: logiOrbWaveC 3.2s ease-in-out infinite .2s; }
+.wave-d { animation: logiOrbWaveD 2.6s ease-in-out infinite .35s; }
+.logi-ai-orb-specular {
+  fill: rgba(255,255,255,.64);
+  filter: blur(1.2px);
+  animation: logiOrbSpecular 3.2s ease-in-out infinite;
+}
+.logi-ai-orb-pulse {
+  fill: none;
+  stroke: rgba(133, 225, 255, .36);
+  stroke-width: .8;
+  transform-origin: 50px 50px;
+  animation: logiOrbPulse 3s ease-out infinite;
+}
+.logi-ai-orb.is-active .logi-ai-orb-ring-a,
+.logi-ai-orb.is-active .logi-ai-orb-ring-b { animation-duration: 3.2s; }
+.logi-ai-orb.is-active .logi-ai-orb-waves { animation-duration: 2.1s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-core { animation-duration: 1.5s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-ring-a { animation-duration: 1.55s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-ring-b { animation-duration: 2.05s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-ring-c { animation-duration: 1.2s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-waves { animation-duration: .95s; }
+.logi-ai-orb.is-thinking .logi-ai-orb-pulse { animation-duration: 1.15s; }
+
+@keyframes logiOrbBreathe { 0%,100%{opacity:.65;transform:scale(.96)} 50%{opacity:1;transform:scale(1.04)} }
+@keyframes logiOrbCore { 0%,100%{transform:scale(.96)} 50%{transform:scale(1.045)} }
+@keyframes logiOrbOrbitA { from{transform:rotate(0deg) scaleY(.98)} to{transform:rotate(360deg) scaleY(.98)} }
+@keyframes logiOrbOrbitB { from{transform:rotate(360deg) scaleY(.93)} to{transform:rotate(0deg) scaleY(.93)} }
+@keyframes logiOrbOrbitC { 0%,100%{transform:rotate(-12deg) scale(1)} 50%{transform:rotate(12deg) scale(1.04)} }
+@keyframes logiOrbWaveFloat { 0%,100%{transform:translateY(1px) scaleX(.96)} 50%{transform:translateY(-1px) scaleX(1.04)} }
+@keyframes logiOrbWaveA { 0%,100%{transform:translateX(-2px) skewX(-2deg)} 50%{transform:translateX(2px) skewX(3deg)} }
+@keyframes logiOrbWaveB { 0%,100%{transform:translateX(2px) scaleY(.92)} 50%{transform:translateX(-2px) scaleY(1.08)} }
+@keyframes logiOrbWaveC { 0%,100%{transform:translateX(-1px) rotate(-1deg)} 50%{transform:translateX(2px) rotate(2deg)} }
+@keyframes logiOrbWaveD { 0%,100%{transform:translateX(1px) scaleY(.9)} 50%{transform:translateX(-2px) scaleY(1.12)} }
+@keyframes logiOrbSpecular { 0%,100%{transform:translate(-1px,1px);opacity:.45} 50%{transform:translate(3px,-2px);opacity:.9} }
+@keyframes logiOrbPulse { 0%{transform:scale(.88);opacity:.65} 75%,100%{transform:scale(1.18);opacity:0} }
+
+/* Requested alignment: greeting lower, chat panel higher. */
+.logi-hover-tip { bottom: 170px !important; }
+
+
+/* LOGI 3.5 — researched Siri-style liquid-glass orb.
+   Inspired by the open-source Siri Orb / VoiceOrbs direction: layered conic
+   gradients, orbital rings and state-driven motion, but kept dependency-free
+   so this tiny chat icon never waits for WebGL/Spline. */
+.logi-ai-orb {
+  --orb-speed: 1;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  width: 72px;
+  height: 72px;
+  display: block !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+  isolation: isolate;
+  filter: drop-shadow(0 5px 13px rgba(45, 117, 255, .24));
+  transform: translateZ(0);
+}
+.logi-ai-orb-aura,
+.logi-ai-orb-ring,
+.logi-ai-orb-glass,
+.logi-ai-orb-pulse {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  display: block !important;
+  transform: translate(-50%, -50%);
+}
+.logi-ai-orb-aura {
+  width: 86%;
+  height: 86%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,255,255,.44), transparent 20%),
+    radial-gradient(circle at 66% 66%, rgba(139,91,255,.48), transparent 54%),
+    radial-gradient(circle at 38% 60%, rgba(0,215,255,.52), transparent 58%);
+  filter: blur(9px);
+  opacity: .72;
+  animation: logiGlassAura calc(5.2s / var(--orb-speed)) ease-in-out infinite;
+}
+.logi-ai-orb-ring {
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background:
+    conic-gradient(from 0deg, rgba(74,235,255,.05), rgba(96,126,255,.9), rgba(255,102,216,.82), rgba(60,230,255,.72), rgba(74,235,255,.05)) border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: .72;
+  transform-origin: 50% 50%;
+}
+.logi-ai-orb .ring-one { width: 94%; height: 48%; transform: translate(-50%, -50%) rotate(-18deg); animation: logiOrbRingOne calc(4.8s / var(--orb-speed)) linear infinite; }
+.logi-ai-orb .ring-two { width: 94%; height: 46%; transform: translate(-50%, -50%) rotate(38deg); opacity: .52; animation: logiOrbRingTwo calc(6.6s / var(--orb-speed)) linear infinite reverse; }
+.logi-ai-orb .ring-three { width: 82%; height: 36%; transform: translate(-50%, -50%) rotate(76deg); opacity: .42; animation: logiOrbRingThree calc(3.9s / var(--orb-speed)) ease-in-out infinite; }
+.logi-ai-orb-glass {
+  width: 72%;
+  height: 72%;
+  border-radius: 50%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 31% 24%, rgba(255,255,255,.38), transparent 14%),
+    radial-gradient(circle at 64% 72%, rgba(102,76,255,.22), transparent 42%),
+    linear-gradient(145deg, rgba(255,255,255,.16), rgba(111,206,255,.07) 45%, rgba(100,79,255,.12));
+  border: 1px solid rgba(255,255,255,.48);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.56),
+    inset 0 -8px 18px rgba(43,67,174,.18),
+    0 0 14px rgba(91,198,255,.22);
+  backdrop-filter: blur(7px) saturate(145%);
+  -webkit-backdrop-filter: blur(7px) saturate(145%);
+}
+.logi-ai-orb-core {
+  position: absolute !important;
+  left: 50%; top: 50%;
+  width: 52%; height: 52%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 38% 32%, #ffffff 0 7%, rgba(186,250,255,.96) 16%, rgba(51,207,255,.68) 34%, rgba(113,80,255,.48) 62%, transparent 75%),
+    conic-gradient(from 210deg, rgba(0,226,255,.78), rgba(111,88,255,.62), rgba(255,105,219,.58), rgba(0,226,255,.78));
+  filter: blur(.2px) drop-shadow(0 0 9px rgba(79,206,255,.48));
+  animation: logiOrbCore calc(3.8s / var(--orb-speed)) ease-in-out infinite;
+}
+.logi-ai-orb-liquid {
+  position: absolute !important;
+  width: 76%; height: 58%;
+  left: 50%; top: 50%;
+  border-radius: 48% 52% 45% 55%;
+  transform: translate(-50%, -50%);
+  filter: blur(2.2px);
+  mix-blend-mode: screen;
+  opacity: .7;
+}
+.logi-ai-orb .liquid-one { background: linear-gradient(105deg, transparent 10%, rgba(37,239,255,.72) 38%, rgba(105,115,255,.64) 58%, transparent 86%); animation: logiLiquidOne calc(3.2s / var(--orb-speed)) ease-in-out infinite; }
+.logi-ai-orb .liquid-two { background: linear-gradient(78deg, transparent 8%, rgba(255,93,214,.64) 42%, rgba(73,190,255,.56) 66%, transparent 91%); animation: logiLiquidTwo calc(4.1s / var(--orb-speed)) ease-in-out infinite reverse; }
+.logi-ai-orb .liquid-three { background: radial-gradient(ellipse at 58% 44%, rgba(255,255,255,.58), rgba(87,222,255,.24) 28%, transparent 66%); animation: logiLiquidThree calc(2.7s / var(--orb-speed)) ease-in-out infinite; }
+.logi-ai-orb-wave {
+  position: absolute !important;
+  left: -10%;
+  width: 120%;
+  height: 24%;
+  border-radius: 50%;
+  border-top: 1.5px solid rgba(255,255,255,.64);
+  border-bottom: 1px solid rgba(50,222,255,.28);
+  filter: blur(.4px) drop-shadow(0 0 3px rgba(89,208,255,.45));
+  mix-blend-mode: screen;
+}
+.logi-ai-orb .wave-one { top: 31%; transform: rotate(-7deg); animation: logiWaveOne calc(2.4s / var(--orb-speed)) ease-in-out infinite; }
+.logi-ai-orb .wave-two { top: 44%; opacity: .62; transform: rotate(7deg); animation: logiWaveTwo calc(2.8s / var(--orb-speed)) ease-in-out infinite reverse; }
+.logi-ai-orb .wave-three { top: 57%; opacity: .42; transform: rotate(-4deg); animation: logiWaveThree calc(3.3s / var(--orb-speed)) ease-in-out infinite; }
+.logi-ai-orb-shine {
+  position: absolute !important;
+  left: 23%; top: 16%;
+  width: 24%; height: 18%;
+  border-radius: 50%;
+  background: rgba(255,255,255,.7);
+  filter: blur(3px);
+  transform: rotate(-22deg);
+  animation: logiGlassShine calc(3.6s / var(--orb-speed)) ease-in-out infinite;
+}
+.logi-ai-orb-pulse {
+  width: 78%; height: 78%;
+  border-radius: 50%;
+  border: 1px solid rgba(114,225,255,.38);
+  opacity: 0;
+  animation: logiOrbPulse calc(2.8s / var(--orb-speed)) ease-out infinite;
+}
+.logi-ai-orb.is-active { --orb-speed: 1.28; }
+.logi-ai-orb.is-thinking { --orb-speed: 2.15; }
+.logi-ai-orb.is-thinking .logi-ai-orb-aura { opacity: .94; }
+.logi-ai-orb.is-thinking .logi-ai-orb-glass { box-shadow: inset 0 1px 0 rgba(255,255,255,.7), inset 0 -8px 18px rgba(53,67,210,.22), 0 0 19px rgba(91,198,255,.34); }
+@keyframes logiGlassAura { 0%,100% { transform: translate(-50%,-50%) scale(.92); opacity:.55 } 50% { transform: translate(-50%,-50%) scale(1.06); opacity:.95 } }
+@keyframes logiOrbRingOne { to { transform: translate(-50%,-50%) rotate(342deg); } }
+@keyframes logiOrbRingTwo { to { transform: translate(-50%,-50%) rotate(-322deg); } }
+@keyframes logiOrbRingThree { 0%,100% { transform: translate(-50%,-50%) rotate(68deg) scaleX(.94); } 50% { transform: translate(-50%,-50%) rotate(86deg) scaleX(1.06); } }
+@keyframes logiOrbCore { 0%,100% { transform: translate(-50%,-50%) scale(.9); } 50% { transform: translate(-50%,-50%) scale(1.08); } }
+@keyframes logiLiquidOne { 0%,100% { transform: translate(-58%,-50%) rotate(-7deg) scale(.92,.86); } 50% { transform: translate(-42%,-48%) rotate(8deg) scale(1.08,1.04); } }
+@keyframes logiLiquidTwo { 0%,100% { transform: translate(-44%,-48%) rotate(8deg) scale(.96,.9); } 50% { transform: translate(-57%,-52%) rotate(-11deg) scale(1.06,1.08); } }
+@keyframes logiLiquidThree { 0%,100% { transform: translate(-48%,-52%) scale(.9); opacity:.42; } 50% { transform: translate(-54%,-46%) scale(1.12); opacity:.82; } }
+@keyframes logiWaveOne { 0%,100% { transform: translateY(3px) rotate(-7deg) scaleX(.9); } 50% { transform: translateY(-3px) rotate(5deg) scaleX(1.08); } }
+@keyframes logiWaveTwo { 0%,100% { transform: translateY(-2px) rotate(7deg) scaleX(1.04); } 50% { transform: translateY(3px) rotate(-5deg) scaleX(.9); } }
+@keyframes logiWaveThree { 0%,100% { transform: translateY(2px) rotate(-4deg) scaleX(.94); } 50% { transform: translateY(-2px) rotate(5deg) scaleX(1.08); } }
+@keyframes logiGlassShine { 0%,100% { opacity:.28; transform: translate(0,0) rotate(-22deg); } 50% { opacity:.82; transform: translate(12px,5px) rotate(-10deg); } }
+@keyframes logiOrbPulse { 0% { transform: translate(-50%,-50%) scale(.72); opacity:.58; } 78%,100% { transform: translate(-50%,-50%) scale(1.22); opacity:0; } }
+@media (prefers-reduced-motion: reduce) {
+  .logi-ai-orb * { animation-play-state: paused !important; }
+}
+
+/* LOGI 3.6 — final greeting alignment requested by user. */
+.logi-hover-tip { bottom: 155px !important; right: 26px !important; }

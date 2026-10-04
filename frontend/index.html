@@ -39,6 +39,10 @@
     <link rel="apple-touch-icon" sizes="128x128" href="/app-icon.png?v=2" />
     <link rel="manifest" href="/manifest.json?v=2" />
 
+    <!-- LOGI: start both local Spline scene downloads before React mounts. -->
+    <link rel="preload" href="/scene-clean.splinecode" as="fetch" fetchpriority="high" crossorigin="anonymous" />
+    <link rel="preload" href="/logi-company-engraving.webp" as="image" fetchpriority="high" />
+
     <meta
       name="apple-mobile-web-app-capable"
       content="yes"

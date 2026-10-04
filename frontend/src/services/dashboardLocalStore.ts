@@ -316,6 +316,7 @@ export function filterDashboardRows(dataset: DashboardLocalDataset, globalFilter
     const d = String(r.dispatch_date || "");
     if (start && (!d || d < start)) return false;
     if (end && (!d || d > end)) return false;
+    if (!isValidInvoiceRow(r)) return false;
     return matches(r, gf);
   });
 }
@@ -346,6 +347,7 @@ export function getLocalFilterOptions(dataset: DashboardLocalDataset, globalFilt
   const vehicleOptions = new Set<string>();
 
   for (const r of dataset.rows) {
+    if (!isValidInvoiceRow(r)) continue;
     const d = String(r.dispatch_date || "");
     if (gf.start_date && (!d || d < gf.start_date)) continue;
     if (gf.end_date && (!d || d > gf.end_date)) continue;
@@ -512,7 +514,7 @@ export function buildLocalLeadTime(rows: LocalSapRow[], globalFilters?: GlobalFi
   const fastest = [...lead].sort((a,b)=>a.days-b.days || String(a.r.dispatch_date).localeCompare(String(b.r.dispatch_date))).slice(0,100).map(x=>({invoice_no:x.r.invoice_no,driver_name:x.r.driver_name,customer_name:x.r.customer_name,invoice_date:x.r.invoice_date || "",dispatch_date:x.r.dispatch_date || "",days:x.days}));
   const longest = [...lead].sort((a,b)=>b.days-a.days || String(b.r.dispatch_date).localeCompare(String(a.r.dispatch_date))).slice(0,100).map(x=>({invoice_no:x.r.invoice_no,driver_name:x.r.driver_name,customer_name:x.r.customer_name,invoice_date:x.r.invoice_date || "",dispatch_date:x.r.dispatch_date || "",days:x.days}));
   return {
-    kpis:{total_invoices:lead.length,overall_avg_days:lead.length?round(lead.reduce((a,x)=>a+x.days,0)/lead.length):null,fastest_days:lead.length?Math.min(...lead.map(x=>x.days)):null,longest_days:lead.length?Math.max(...lead.map(x=>x.days)):null},
+    kpis:{total_invoices:rows.length,overall_avg_days:lead.length?round(lead.reduce((a,x)=>a+x.days,0)/lead.length):null,fastest_days:lead.length?Math.min(...lead.map(x=>x.days)):null,longest_days:lead.length?Math.max(...lead.map(x=>x.days)):null},
     by_classification:rowsByClass,distribution:{bins:bands,counts},fastest_detail:fastest,longest_detail:longest,
     band_classification_matrix:{classifications:classes,rows:matrixRows,col_totals:Object.fromEntries(classes.map(c=>[c,matrixRows.reduce((n,r)=>n+(r.counts[c]||0),0)])),grand_total:lead.length},
     available_bands:bands.filter((_,i)=>counts[i]>0),available_classifications:classes,

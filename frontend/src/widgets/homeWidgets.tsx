@@ -47,16 +47,17 @@ import { GlassTable } from "../design-system/GlassTable";
 import { GlassBadge } from "../design-system/GlassBadge";
 import { CHART_PALETTE, chartGrid, chartAxisTick, chartAxisLine, GlassTooltip, ChartPanel, chartBarProps } from "../design-system/chartTheme";
 import { fadeUp } from "../design-system/motion";
+import { getOptionIcon } from "../lib/domainIcons";
 
 export const HOME_KPI_DEFS: { key: string; icon: string; label: string; getValue: (k: HomeDashboard["kpis"]) => string | number; metric?: string }[] = [
-  { key: "valid_invoices", icon: "📋", label: "Valid Invoices", getValue: (k) => k.valid_invoices.toLocaleString(), metric: "valid_invoices" },
+  { key: "valid_invoices", icon: "📋", label: "Total Invoices", getValue: (k) => k.valid_invoices.toLocaleString(), metric: "valid_invoices" },
   { key: "total_boxes", icon: "📦", label: "Total Boxes", getValue: (k) => k.total_boxes.toLocaleString(), metric: "total_boxes" },
   { key: "freezer_boxes", icon: "❄️", label: "Freezer Boxes", getValue: (k) => k.freezer_boxes.toLocaleString(), metric: "freezer_boxes" },
   { key: "active_drivers", icon: "🚚", label: "Active Drivers", getValue: (k) => k.active_drivers, metric: "active_drivers" },
   { key: "avg_boxes_per_driver", icon: "📊", label: "Avg Boxes / Driver", getValue: (k) => k.avg_boxes_per_driver, metric: "active_drivers" },
   { key: "not_supplied", icon: "⚠️", label: "Not Supplied", getValue: (k) => k.not_supplied, metric: "not_supplied" },
   { key: "avg_lead_time_days", icon: "📅", label: "Avg Lead Time (Days)", getValue: (k) => k.avg_lead_time_days ?? "N/A", metric: "valid_invoices" },
-  { key: "unique_customers", icon: "🏪", label: "Unique Customers", getValue: (k) => k.unique_customers, metric: "unique_customers" },
+  { key: "unique_customers", icon: "🏪", label: "Customers", getValue: (k) => k.unique_customers, metric: "unique_customers" },
   { key: "avg_route_hours", icon: "⏱️", label: "Avg Route Hours", getValue: (k) => k.avg_route_hours ?? "N/A" },
   { key: "orders_per_driver", icon: "🏆", label: "Orders / Driver", getValue: (k) => k.orders_per_driver, metric: "active_drivers" },
   { key: "active_vehicles", icon: "🚗", label: "Active Vehicles", getValue: (k) => k.active_vehicles, metric: "active_vehicles" },
@@ -93,7 +94,54 @@ function pctTooltipFormatter(data: { name: string; value: number }[]) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   return (value: number, name: string): [string, string] => [`${value} (${total ? Math.round((value / total) * 100) : 0}%)`, name];
 }
-const renderPctLabel = ({ percent }: { percent: number }) => (percent >= 0.04 ? `${Math.round(percent * 100)}%` : "");
+
+function ChartBreakdownLegend({
+  items,
+  colors,
+  iconGroup,
+}: {
+  items: { name: string; value: number }[];
+  colors: string[];
+  iconGroup: "facility" | "delivery";
+}) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  return (
+    <div className="flex flex-col gap-2 px-2 pb-1 pt-1" aria-label="Chart breakdown">
+      {items.map((item, index) => {
+        const Icon = iconGroup === "facility"
+          ? getOptionIcon("Facility Type", item.name, Store)
+          : item.name.toLowerCase() === "delivered" ? CheckCircle2 : AlertTriangle;
+        const percentage = total ? Math.round((item.value / total) * 100) : 0;
+        const color = colors[index % colors.length];
+        return (
+          <div
+            key={item.name}
+            className="flex min-w-0 items-center gap-2"
+            title={`${item.name}: ${item.value} (${percentage}%)`}
+          >
+            <Icon
+              className="h-4 w-4 shrink-0"
+              style={{ color }}
+              aria-hidden="true"
+            />
+            <span
+              className="min-w-0 flex-1 truncate text-[12px] font-medium"
+              style={{ color }}
+            >
+              {item.name}
+            </span>
+            <span
+              className="shrink-0 text-[12px] font-semibold tabular-nums"
+              style={{ color }}
+            >
+              {percentage}%
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function BoxesByDriverChart({ data, onBarClick }: { data: HomeDashboard; onBarClick?: (driverName: string) => void }) {
   const [showAll, setShowAll] = useState(false);
@@ -129,8 +177,10 @@ export function FacilityDistributionChart({ data }: { data: HomeDashboard }) {
   const facilityData = data.charts.facility.labels.map((l, i) => ({ name: l, value: data.charts.facility.values[i] }));
   return (
     <ChartPanel title="Facility Distribution" icon={Store}>
-      <ResponsiveContainer width="100%" height={260}>
-        <PieChart>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
           {/*
             ITEM PASS 5 (chart labels overlapping, e.g. "Government"):
             Facility Type can have many distinct categories (Pharma,
@@ -153,9 +203,17 @@ export function FacilityDistributionChart({ data }: { data: HomeDashboard }) {
             {facilityData.map((_, i) => <Cell key={i} fill={CHART_PALETTE[i % CHART_PALETTE.length]} stroke="var(--navy2)" strokeWidth={2} />)}
           </Pie>
           <Tooltip content={<GlassTooltip formatter={pctTooltipFormatter(facilityData)} />} />
-          <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
-        </PieChart>
-      </ResponsiveContainer>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="w-full shrink-0 sm:w-[150px]">
+          <ChartBreakdownLegend
+            items={facilityData}
+            colors={CHART_PALETTE}
+            iconGroup="facility"
+          />
+        </div>
+      </div>
     </ChartPanel>
   );
 }
@@ -181,16 +239,26 @@ export function ReturnsChart({ data }: { data: HomeDashboard }) {
   const returnsData = [{ name: "Delivered", value: data.charts.returns.delivered }, { name: "Not Supplied", value: data.charts.returns.not_supplied }];
   return (
     <ChartPanel title="Delivered vs Not Supplied" icon={CheckCircle2}>
-      <ResponsiveContainer width="100%" height={260}>
-        <PieChart>
-          <Pie data={returnsData} dataKey="value" nameKey="name" outerRadius={90} label={renderPctLabel} labelLine>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+          <Pie data={returnsData} dataKey="value" nameKey="name" outerRadius={90}>
             <Cell fill="var(--green)" stroke="var(--navy2)" strokeWidth={2} />
             <Cell fill="var(--red)" stroke="var(--navy2)" strokeWidth={2} />
           </Pie>
           <Tooltip content={<GlassTooltip formatter={pctTooltipFormatter(returnsData)} />} />
-          <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
-        </PieChart>
-      </ResponsiveContainer>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="w-full shrink-0 sm:w-[150px]">
+          <ChartBreakdownLegend
+            items={returnsData}
+            colors={["var(--green)", "var(--red)"]}
+            iconGroup="delivery"
+          />
+        </div>
+      </div>
     </ChartPanel>
   );
 }
