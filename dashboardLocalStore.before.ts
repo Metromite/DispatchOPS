@@ -67,7 +67,7 @@ const LOCAL_DB_NAME = "dispatchops-dashboard-local-v3";
 const LOCAL_DB_STORE = "dataset";
 const LOCAL_DB_KEY = "all-history";
 const LOCAL_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const LOCAL_DATASET_VERSION = 3;
+const LOCAL_DATASET_VERSION = 2;
 
 function openLocalDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -592,76 +592,6 @@ function routeMonth(value: unknown): string {
 }
 
 
-function tokenEditSimilarity(a: string, b: string): number {
-  if (a === b) return 1;
-  if (!a || !b) return 0;
-  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let diagonal = prev[0];
-    prev[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const above = prev[j];
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diagonal + cost);
-      diagonal = above;
-    }
-  }
-  return 1 - prev[b.length] / Math.max(a.length, b.length);
-}
-
-function driverNameSimilarity(a: string, b: string): number {
-  const left = normalizeDriverIdentity(a);
-  const right = normalizeDriverIdentity(b);
-  if (!left || !right) return 0;
-  if (left === right) return 1;
-  const lt = left.split(/[^a-z0-9]+/i).filter(Boolean);
-  const rt = right.split(/[^a-z0-9]+/i).filter(Boolean);
-  if (!lt.length || !rt.length) return 0;
-  const source = lt.length <= rt.length ? lt : rt;
-  const target = lt.length <= rt.length ? rt : lt;
-  const scores = source.map(token => Math.max(...target.map(other => tokenEditSimilarity(token, other))));
-  const score = scores.reduce((sum, value) => sum + value, 0) / scores.length;
-  const compactLeft = normalizeMatchKey(left);
-  const compactRight = normalizeMatchKey(right);
-  if (compactLeft && compactRight && (compactLeft.startsWith(compactRight) || compactRight.startsWith(compactLeft))) {
-    return Math.max(0.92, score);
-  }
-  return score;
-}
-
-function resolveDriverName(candidate: string, preferred: Map<string, { display: string }>, global: Map<string, { display: string }>): { display: string; score: number } | null {
-  const normalized = normalizeDriverIdentity(candidate);
-  if (!normalized || normalized === "unknown" || normalized === "[ unknown ]") return null;
-  const exact = preferred.get(normalized);
-  if (exact) return { display: exact.display, score: 1 };
-
-  const pickBest = (items: { display: string }[]) => {
-    let best: { display: string; score: number } | null = null;
-    let second = 0;
-    for (const item of items) {
-      const score = driverNameSimilarity(candidate, item.display);
-      if (score > (best?.score || 0)) {
-        second = best?.score || 0;
-        best = { display: item.display, score };
-      } else if (score > second) {
-        second = score;
-      }
-    }
-    const singleToken = normalized.split(/[^a-z0-9]+/i).filter(Boolean).length === 1;
-    const threshold = singleToken ? 0.78 : 0.82;
-    return best && best.score >= threshold && (best.score - second >= 0.12 || best.score >= 0.92) ? best : null;
-  };
-
-  // When SAP has exactly one owner for this vehicle/day, that owner is the
-  // authoritative delivery driver even if Landmark's text contains a short or
-  // stale name. This is what prevents a real SAP driver from becoming zero.
-  if (preferred.size === 1) return { display: [...preferred.values()][0].display, score: 1 };
-  // With multiple SAP owners on the same day, require GPS to distinguish them;
-  // never let a different-day/global driver steal the route.
-  if (preferred.size > 1) return pickBest([...preferred.values()]);
-  return pickBest([...global.values()]);
-}
-
 let sharedVehicleHydrationKey = "";
 let sharedVehicleHydrationPromise: Promise<void> | null = null;
 
@@ -672,102 +602,52 @@ async function hydrateSharedVehicleDriverCards(dataset: DashboardLocalDataset, s
   const key = `${periodStart}::${periodEnd}`;
   if (sharedVehicleHydrationKey === key || sharedVehicleHydrationPromise) return;
 
-  // SAP is the order/driver roster and Landmark is the actual GPS route stream.
-  // Build ownership by vehicle + day, but never collapse a vehicle to one driver.
-  type Owner = { display: string; identity: string; invoices: number; boxes: number; freezer: number };
-  const ownersByVehicleDay = new Map<string, Map<string, Map<string, Owner>>>();
-  const globalDrivers = new Map<string, { display: string }>();
-  const sapByVehicleDayDriver = new Map<string, { invoices: number; boxes: number; freezer: number }>();
-
-  // Keep the Fleet master roster in the identity index as well as SAP.
-  // Some Landmark drivers are abbreviated (for example "Jamseer") while the
-  // Fleet/SAP identity is the full name ("Jamseer PV Ibrahim"). Using the
-  // canonical driver directory here prevents a real GPS driver from being
-  // dropped merely because his SAP rows were excluded by another dashboard
-  // dimension. This is read-only and scoped to Driver Performance matching.
-  try {
-    const { data: fleetDrivers, error: fleetDriverError } = await getPrimarySupabaseClient()
-      .from("drivers").select("code,name").order("name");
-    if (!fleetDriverError) {
-      for (const driver of fleetDrivers || []) {
-        const display = String(driver?.name || "").trim();
-        const identity = normalizeDriverIdentity(display);
-        if (identity) globalDrivers.set(identity, { display });
-      }
-    }
-  } catch {
-    // SAP remains the fallback identity roster if Fleet master data is unavailable.
-  }
-
+  // Build the real SAP ownership timeline first: Vehicle -> Day -> Driver.
+  // A vehicle can legitimately have different drivers on different days.
+  const ownersByVehicleDay = new Map<string, Map<string, Map<string, { display: string; dates: Set<string>; invoices: number; boxes: number; freezer: number }>>>();
   for (const row of dataset.rows) {
     const date = String(row.dispatch_date || "").slice(0, 10);
+    if (!date || (periodStart && date < periodStart) || (periodEnd && date > periodEnd)) continue;
     const vehicle = normalizeMatchKey(row.vehicle_key || row.vehicle_num);
-    const identity = normalizeDriverIdentity(row.driver_name);
-    if (!date || !vehicle || !identity || (periodStart && date < periodStart) || (periodEnd && date > periodEnd)) continue;
-    const display = String(row.driver_name || identity).trim() || identity;
-    globalDrivers.set(identity, { display });
-    const byDate = ownersByVehicleDay.get(vehicle) || new Map<string, Map<string, Owner>>();
-    const byDriver = byDate.get(date) || new Map<string, Owner>();
-    const owner = byDriver.get(identity) || { display, identity, invoices: 0, boxes: 0, freezer: 0 };
+    const driver = normalizeDriverIdentity(row.driver_name);
+    if (!vehicle || !driver) continue;
+    const byDate = ownersByVehicleDay.get(vehicle) || new Map();
+    const byDriver = byDate.get(date) || new Map();
+    const owner = byDriver.get(driver) || {
+      display: String(row.driver_name || driver).trim() || driver,
+      dates: new Set<string>(), invoices: 0, boxes: 0, freezer: 0,
+    };
+    owner.dates.add(date);
     owner.invoices += 1;
     owner.boxes += Number(row.boxes || 0);
     owner.freezer += Number(row.freezer_boxes || 0);
-    byDriver.set(identity, owner);
+    byDriver.set(driver, owner);
     byDate.set(date, byDriver);
     ownersByVehicleDay.set(vehicle, byDate);
-
-    const sapKey = `${vehicle}::${date}::${identity}`;
-    const sap = sapByVehicleDayDriver.get(sapKey) || { invoices: 0, boxes: 0, freezer: 0 };
-    sap.invoices += 1;
-    sap.boxes += Number(row.boxes || 0);
-    sap.freezer += Number(row.freezer_boxes || 0);
-    sapByVehicleDayDriver.set(sapKey, sap);
   }
 
-  // Rebuild driver-aware GPS for EVERY SAP vehicle in the selected period.
-  // The old version only hydrated vehicles it classified as shared. That left
-  // a driver such as Jamseer with zero whenever the vehicle had been aggregated
-  // into one period-level RPC card and his particular route day was not the
-  // card's representative date. This is application-side only: no database
-  // query/function/schema is changed.
-  const hydratedVehicles = [...ownersByVehicleDay.keys()];
-  if (!hydratedVehicles.length) { sharedVehicleHydrationKey = key; return; }
-
-  // IMPORTANT: `hydratedVehicles` is an internal normalized key (lowercase,
-  // punctuation removed). Supabase equality on vehicle_key is case-sensitive.
-  // Always query the original database values so `o72506` still matches `O72506`.
-  const hydratedVehicleDbKeys = [...new Set(
-    dataset.rows
-      .filter(row => hydratedVehicles.includes(normalizeMatchKey(row.vehicle_key || row.vehicle_num)))
-      .map(row => String(row.vehicle_key || row.vehicle_num || '').trim())
-      .filter(Boolean)
-  )];
+  const sharedVehicles = [...ownersByVehicleDay.entries()]
+    .filter(([, byDate]) => [...byDate.values()].some((drivers) => drivers.size > 1) || byDate.size > 1)
+    .map(([vehicle]) => vehicle);
+  if (!sharedVehicles.length) { sharedVehicleHydrationKey = key; return; }
 
   sharedVehicleHydrationPromise = (async () => {
     try {
       const clients = getFederatedSupabaseClients();
       const lmRows: any[] = [];
       const chunks: string[][] = [];
-      for (let i = 0; i < hydratedVehicleDbKeys.length; i += 80) chunks.push(hydratedVehicleDbKeys.slice(i, i + 80));
+      for (let i = 0; i < sharedVehicles.length; i += 80) chunks.push(sharedVehicles.slice(i, i + 80));
 
-      // Read all federated GPS sources. A single project/chunk must never
-      // abort the driver reconstruction for the other projects. This is
-      // especially important for the Primary -> Secondary -> Tertiary model:
-      // one empty/slow/unavailable overflow project must not erase valid GPS
-      // cards that already exist in another project.
       for (const client of clients) {
         for (const chunk of chunks) {
           let q = client.from("landmark_visit_facts")
-            .select("vehicle_key,vehicle_raw,driver_name,customer_name,visit_date,arrival,departure,minutes,is_passthrough,is_depot")
+            .select("vehicle_key,vehicle_raw,driver_name,visit_date,arrival,departure,minutes,is_passthrough,is_depot")
             .in("vehicle_key", chunk);
           if (periodStart) q = q.gte("visit_date", periodStart);
           if (periodEnd) q = q.lte("visit_date", periodEnd);
-          try {
-            const { data, error } = await q;
-            if (!error) lmRows.push(...(data || []));
-          } catch {
-            // Keep the successful federated sources.
-          }
+          const { data, error } = await q;
+          if (error) throw new Error(error.message);
+          lmRows.push(...(data || []));
         }
       }
 
@@ -775,20 +655,26 @@ async function hydrateSharedVehicleDriverCards(dataset: DashboardLocalDataset, s
         const t = Date.parse(String(value || ""));
         return Number.isFinite(t) ? t : null;
       };
-      type GpsBucket = {
-        vehicle: string; date: string; rawDriver: string; vehicle_raw: string;
-        stops: number; passthru: number; stopMinutes: number;
-        routeStart: number | null; routeEnd: number | null;
-      };
-      const gps = new Map<string, GpsBucket>();
+      const gpsByVehicleDayDriver = new Map<string, { vehicle: string; date: string; driver: string; vehicle_raw: string; stops: number; passthru: number; stopMinutes: number; routeStart: number | null; routeEnd: number | null }>();
+
       for (const row of lmRows) {
         const vehicle = normalizeMatchKey(row.vehicle_key);
         const date = String(row.visit_date || "").slice(0, 10);
         if (!vehicle || !date) continue;
-        const rawDriver = normalizeDriverIdentity(row.driver_name) || "unknown";
-        const k = `${vehicle}::${date}::${rawDriver}`;
-        const item = gps.get(k) || {
-          vehicle, date, rawDriver, vehicle_raw: String(row.vehicle_raw || ""),
+        const owners = ownersByVehicleDay.get(vehicle)?.get(date);
+        if (!owners?.size) continue;
+
+        let driver = normalizeDriverIdentity(row.driver_name);
+        if (!driver || !owners.has(driver)) {
+          // If GPS has no usable driver, only infer when SAP has one driver for
+          // that exact vehicle/day. Never borrow a driver from another day.
+          if (owners.size === 1) driver = [...owners.keys()][0];
+        }
+        if (!driver || !owners.has(driver)) continue;
+
+        const k = `${vehicle}::${date}::${driver}`;
+        const item = gpsByVehicleDayDriver.get(k) || {
+          vehicle, date, driver, vehicle_raw: String(row.vehicle_raw || ""),
           stops: 0, passthru: 0, stopMinutes: 0, routeStart: null, routeEnd: null,
         };
         const isPass = Boolean(row.is_passthrough);
@@ -802,106 +688,76 @@ async function hydrateSharedVehicleDriverCards(dataset: DashboardLocalDataset, s
         const ts = parseTime(row.departure || row.arrival);
         if (ts !== null && isDepot) item.routeStart = item.routeStart === null ? ts : Math.min(item.routeStart, ts);
         if (ts !== null && !isPass && !isDepot) item.routeEnd = item.routeEnd === null ? ts : Math.max(item.routeEnd, ts);
-        gps.set(k, item);
+        gpsByVehicleDayDriver.set(k, item);
       }
 
-      // Resolve every GPS driver/day independently. This is the key fix:
-      // vehicle identity is no longer the driver identity. A shared vehicle can
-      // therefore produce multiple route cards on the same day when GPS names
-      // identify different drivers/times.
-      const resolved = new Map<string, RouteCard>();
-      for (const item of gps.values()) {
-        const owners = ownersByVehicleDay.get(item.vehicle)?.get(item.date) || new Map<string, Owner>();
-        const preferred = new Map<string, { display: string }>();
-        for (const owner of owners.values()) preferred.set(owner.identity, { display: owner.display });
-        // Landmark's driver name is a direct GPS identity signal. When it
-        // matches a known SAP/Fleet driver (including shortened names such as
-        // "Jamseer" -> "Jamseer PV Ibrahim"), prefer that identity even if
-        // the same vehicle has a different SAP owner on that calendar day.
-        // This is important for real shared-vehicle cases: GPS must not be
-        // discarded merely because SAP assignment was stale or delayed.
-        const globalMatch = resolveDriverName(item.rawDriver, new Map(), globalDrivers);
-        const match = globalMatch && globalMatch.score >= 0.9
-          ? globalMatch
-          : resolveDriverName(item.rawDriver, preferred, globalDrivers);
-        let displayDriver = match?.display || "";
-        if (!displayDriver && owners.size === 1 && (item.rawDriver === "unknown" || item.rawDriver === "[ unknown ]")) {
-          displayDriver = [...owners.values()][0].display;
-        }
-        if (!displayDriver) continue;
-
-        const displayIdentity = normalizeDriverIdentity(displayDriver);
-        const sap = sapByVehicleDayDriver.get(`${item.vehicle}::${item.date}::${displayIdentity}`) || { invoices: 0, boxes: 0, freezer: 0 };
-        const hours = item.routeStart !== null && item.routeEnd !== null && item.routeEnd >= item.routeStart
-          ? (item.routeEnd - item.routeStart) / 3600000 : 0;
-        const avgStop = item.stops ? item.stopMinutes / item.stops : 0;
-        const cardKey = `${item.vehicle}::${item.date}::${displayIdentity}`;
-        const existing = resolved.get(cardKey);
-        if (existing) {
-          const existingHours = (() => {
-            const m = String(existing.route_duration_hm || "").match(/(\d+)h\s+(\d+)m/);
-            return m ? Number(m[1]) + Number(m[2]) / 60 : 0;
-          })();
-          const mergedStops = Number(existing.stops || 0) + item.stops;
-          const mergedMinutes = Number(existing.avg_stop_hm?.match?.(/(\d+)h\s+(\d+)m/)?.[1] || 0) * 60 + Number(existing.avg_stop_hm?.match?.(/(\d+)h\s+(\d+)m/)?.[2] || 0);
-          const totalStopMinutes = mergedStops ? (mergedMinutes * Number(existing.stops || 0) + item.stopMinutes) / mergedStops : 0;
-          resolved.set(cardKey, {
-            ...existing,
-            route_start: existing.route_start && item.routeStart !== null ? new Date(Math.min(Date.parse(existing.route_start), item.routeStart)).toISOString() : existing.route_start,
-            route_end: existing.route_end && item.routeEnd !== null ? new Date(Math.max(Date.parse(existing.route_end), item.routeEnd)).toISOString() : existing.route_end,
-            route_duration_hm: `${Math.floor(existingHours + hours)}h ${Math.floor(((existingHours + hours) * 60) % 60)}m`,
-            stops: mergedStops,
-            avg_stop_hm: `${Math.floor(totalStopMinutes / 60)}h ${Math.floor(totalStopMinutes % 60)}m`,
-            passthru_count: Number(existing.passthru_count || 0) + item.passthru,
-            sap_orders: sap,
-          });
-        } else {
-          resolved.set(cardKey, {
-            vehicle_key: item.vehicle,
-            vehicle_num: item.vehicle_raw || item.vehicle,
-            vehicle_model: "",
-            display_driver: displayDriver,
-            match_method: "vehicle",
-            match_confidence: match && match.score >= 0.9 ? "daily-driver" : "gps-driver",
-            route_start: item.routeStart !== null ? new Date(item.routeStart).toISOString() : `${item.date}T00:00:00.000Z`,
-            route_end: item.routeEnd !== null ? new Date(item.routeEnd).toISOString() : `${item.date}T00:00:00.000Z`,
-            route_duration_hm: `${Math.floor(hours)}h ${Math.floor((hours * 60) % 60)}m`,
-            stops: item.stops,
-            avg_stop_hm: `${Math.floor(avgStop / 60)}h ${Math.floor(avgStop % 60)}m`,
-            passthru_count: item.passthru,
-            sap_orders: sap,
-          });
-        }
-      }
-
-      // Do not manufacture GPS cards for drivers that were not actually
-      // resolved from Landmark. A fabricated vehicle-level fallback was the
-      // reason the KPI rose from the real fleet count to 48 cards and it hid
-      // the underlying driver-matching problem. A zero now remains a truthful
-      // signal that still needs an evidence-backed match.
-
-      // Replace vehicle-level cards only for shared vehicles/days for which we
-      // have a driver-aware GPS reconstruction. All unrelated cards stay intact.
-      const covered = new Set([...resolved.values()].map((card) => `${normalizeMatchKey(card.vehicle_key)}::${String(card.route_start || card.route_end).slice(0, 10)}`));
       const next: RouteCard[] = [];
       for (const base of dataset.routeCards) {
         const vehicle = normalizeMatchKey(base.vehicle_key || base.vehicle_num);
         const date = String(base.route_start || base.route_end || "").slice(0, 10);
-        if (vehicle && date && hydratedVehicles.includes(vehicle) && covered.has(`${vehicle}::${date}`)) continue;
-        next.push(base);
+        const byDate = ownersByVehicleDay.get(vehicle);
+        const owners = byDate?.get(date);
+
+        if (!vehicle || !date || !owners?.size) {
+          next.push(base);
+          continue;
+        }
+
+        // Prefer the route card's own driver when it matches the exact SAP day;
+        // otherwise use the only SAP owner for that exact day. This prevents a
+        // driver from another day on the same vehicle from replacing this one.
+        const cardDriver = normalizeDriverIdentity(base.display_driver);
+        let ownerEntry = cardDriver ? [...owners.entries()].find(([id]) => normalizeMatchKey(id) === normalizeMatchKey(cardDriver)) : undefined;
+        if (!ownerEntry && owners.size === 1) ownerEntry = [...owners.entries()][0];
+        if (!ownerEntry) {
+          // Multiple SAP drivers on the same day and GPS did not identify one:
+          // keep the original route card rather than inventing ownership.
+          next.push(base);
+          continue;
+        }
+
+        const [driver, owner] = ownerEntry;
+        const gps = gpsByVehicleDayDriver.get(`${vehicle}::${date}::${driver}`);
+        if (!gps) {
+          // The driver has valid SAP orders for this vehicle/day even when GPS
+          // did not return a matching row. Preserve the existing route metrics
+          // and attach the correct daily driver instead of showing zero/unknown.
+          next.push({
+            ...base,
+            vehicle_key: base.vehicle_key,
+            display_driver: owner.display,
+            match_method: "vehicle",
+            match_confidence: "daily-driver",
+            sap_orders: { invoices: owner.invoices, boxes: owner.boxes, freezer: owner.freezer },
+          });
+          continue;
+        }
+
+        const hours = gps.routeStart !== null && gps.routeEnd !== null && gps.routeEnd >= gps.routeStart
+          ? (gps.routeEnd - gps.routeStart) / 3600000 : 0;
+        const avgStop = gps.stops ? gps.stopMinutes / gps.stops : 0;
+        next.push({
+          ...base,
+          vehicle_key: base.vehicle_key,
+          vehicle_num: base.vehicle_num || gps.vehicle_raw,
+          display_driver: owner.display,
+          match_method: "vehicle",
+          match_confidence: "daily-driver",
+          route_start: gps.routeStart !== null ? new Date(gps.routeStart).toISOString() : base.route_start,
+          route_end: gps.routeEnd !== null ? new Date(gps.routeEnd).toISOString() : base.route_end,
+          route_duration_hm: `${Math.floor(hours)}h ${Math.floor((hours * 60) % 60)}m`,
+          stops: gps.stops,
+          avg_stop_hm: `${Math.floor(avgStop / 60)}h ${Math.floor(avgStop % 60)}m`,
+          passthru_count: gps.passthru,
+          sap_orders: { invoices: owner.invoices, boxes: owner.boxes, freezer: owner.freezer },
+        });
       }
-      next.push(...resolved.values());
-      next.sort((a, b) => String(b.route_start || "").localeCompare(String(a.route_start || "")));
-      // IMPORTANT: useSyncExternalStore compares snapshots by identity. The
-      // previous code mutated `dataset.routeCards` in place and emitted the
-      // same object, so React could keep rendering the old zero-result snapshot
-      // even though GPS hydration had already produced the correct cards.
-      // Publish a NEW dataset object and keep baseRouteCards immutable.
-      current = { ...dataset, routeCards: next };
+
+      dataset.routeCards = next;
       sharedVehicleHydrationKey = key;
       emit();
     } catch {
-      // Optional driver-aware enrichment must never break the working Dashboard.
+      // Optional enrichment must never break the working Dashboard.
       sharedVehicleHydrationKey = key;
     } finally {
       sharedVehicleHydrationPromise = null;
@@ -910,7 +766,7 @@ async function hydrateSharedVehicleDriverCards(dataset: DashboardLocalDataset, s
   await sharedVehicleHydrationPromise;
 }
 
-export function buildLocalDriverPerformance(rows: LocalSapRow[], routeCards: RouteCard[], gf?: GlobalFilters, ownershipRows: LocalSapRow[] = rows): PerfData {
+export function buildLocalDriverPerformance(rows: LocalSapRow[], routeCards: RouteCard[], gf?: GlobalFilters): PerfData {
   // Keep the important fix from V13.6.63: GPS is NEVER allowed to fall back
   // into another month. The matching below is simply more tolerant INSIDE the
   // selected period so SAP/Overview and GPS can still be joined when their
@@ -932,7 +788,7 @@ export function buildLocalDriverPerformance(rows: LocalSapRow[], routeCards: Rou
     ownership.set(alias, byDate);
   };
 
-  for (const row of ownershipRows) {
+  for (const row of rows) {
     const date = String(row.dispatch_date || "").slice(0, 10);
     const identity = normalizeDriverIdentity(row.driver_name);
     if (!date || !identity) continue;
@@ -1010,25 +866,18 @@ export function buildLocalDriverPerformance(rows: LocalSapRow[], routeCards: Rou
       .filter(Boolean)
   );
 
-  const selectedDriverMatches = (cardDriver: string, selected: Set<string>) => {
-    if (!selected.size) return true;
-    const candidate = normalizeDriverIdentity(cardDriver);
-    if (!candidate) return false;
-    for (const wanted of selected) {
-      if (candidate === wanted) return true;
-      const score = driverNameSimilarity(candidate, wanted);
-      if (score >= 0.82) return true;
-      const left = normalizeMatchKey(candidate);
-      const right = normalizeMatchKey(wanted);
-      if (left && right && (left.startsWith(right) || right.startsWith(left)) && Math.min(left.length, right.length) >= 5) return true;
-    }
-    return false;
-  };
-
   const cards = routeCards
     .filter((card) => {
       const date = String(card.route_start || card.route_end || "").slice(0, 10);
-      return inSelectedPeriod(date);
+      if (!inSelectedPeriod(date)) return false;
+      // When Driver slicers are active, preserve the route card's own resolved
+      // driver identity. Never relabel a shared-vehicle route just because the
+      // filtered SAP rows now contain only the other driver.
+      if (selectedDrivers.size) {
+        const cardDriver = normalizeDriverIdentity(card.display_driver);
+        if (!cardDriver || !selectedDrivers.has(cardDriver)) return false;
+      }
+      return true;
     })
     .map((card) => {
       const date = String(card.route_start || card.route_end || "").slice(0, 10);
@@ -1038,66 +887,34 @@ export function buildLocalDriverPerformance(rows: LocalSapRow[], routeCards: Rou
       if (!date || !aliases.length) return null;
 
       const allowedDrivers = getOwners(aliases, date);
+      if (!allowedDrivers.size) return null;
+
       const gpsDriver = String(card.display_driver || "").trim();
+      const direct = [...allowedDrivers.entries()].find(([, owner]) => driverMatches(gpsDriver, owner.identity));
+      if (direct) return { ...card, display_driver: direct[1].display };
 
-      // Cards produced by the Landmark hydration pass already carry an
-      // evidence-backed GPS identity. Never remap those cards back to a
-      // different SAP owner just because the same vehicle had another driver
-      // on another day. That re-mapping was one of the paths that turned real
-      // drivers into zero after the shared-vehicle reconstruction.
-      if (card.match_confidence === "daily-driver" || card.match_confidence === "gps-driver") {
-        return { ...card };
-      }
-
-      // Exact/fuzzy daily ownership wins for the original vehicle-level cards.
-      const direct = [...allowedDrivers.entries()]
-        .map(([id, owner]) => ({ id, owner, score: driverNameSimilarity(gpsDriver, owner.display) }))
-        .sort((a, b) => b.score - a.score)[0];
-      if (direct && direct.score >= 0.5) return { ...card, display_driver: direct.owner.display };
-
-      // If GPS carries a short/variant name, resolve it against the complete
-      // SAP roster rather than dropping the card just because the spelling is
-      // different (e.g. "Shabeer Ali" vs "Shabeer Ali A.Rahman").
-      if (gpsDriver) {
-        const roster = new Map<string, Owner>();
-        for (const row of ownershipRows) {
-          const id = normalizeDriverIdentity(row.driver_name);
-          if (!id || roster.has(id)) continue;
-          roster.set(id, { identity: id, display: String(row.driver_name || id).trim() || id });
-        }
-        const resolved = resolveDriverName(gpsDriver, new Map(), new Map([...roster.entries()].map(([id, owner]) => [id, { display: owner.display }])));
-        if (resolved) return { ...card, display_driver: resolved.display };
-      }
-
-      // A single daily SAP owner is still a safe fallback for GPS rows whose
-      // driver field is blank/unknown. Never borrow a driver from another day.
+      // If GPS does not carry a usable/matching driver name, only repair the
+      // card when SAP says this vehicle belongs to exactly one driver in the
+      // selected month. Never guess when two drivers share the vehicle.
       if (allowedDrivers.size === 1) {
-        const owner = [...allowedDrivers.values()][0];
-        return { ...card, display_driver: owner.display };
+        const [driver] = [...allowedDrivers.values()];
+        return { ...card, display_driver: driver.display };
       }
-
-      // Do not throw away a real GPS route card. Keeping it visible is safer
-      // than turning a real driver's performance into a false zero.
-      return { ...card };
+      return null;
     })
-    .filter((card): card is RouteCard => Boolean(card))
-    // Apply the Driver slicer only after the GPS/SAP driver identity has been
-    // resolved. Otherwise a valid GPS alias can be filtered out before it gets
-    // mapped to the selected SAP driver name.
-    .filter((card) => selectedDriverMatches(card.display_driver, selectedDrivers));
+    .filter((card): card is RouteCard => Boolean(card));
 
   const stops=cards.reduce((n,r)=>n+Number(r.stops||0),0);
   const hours=cards.map(r=>{const m=String(r.route_duration_hm||"").match(/(\d+)h\s+(\d+)m/);return m?Number(m[1])+Number(m[2])/60:0;}).filter(n=>n>0);
-  const gpsVehicleCount=new Set(cards.map(r=>normalizeMatchKey(r.vehicle_key||r.vehicle_num)).filter(Boolean)).size;
   const driverMap=new Map<string,{stops:number;hours:number}>();
   for(const r of cards){const d=String(r.display_driver||"Unknown").trim()||"Unknown";const x=driverMap.get(d)||{stops:0,hours:0};x.stops+=Number(r.stops||0);const m=String(r.route_duration_hm||"").match(/(\d+)h\s+(\d+)m/);if(m)x.hours+=Number(m[1])+Number(m[2])/60;driverMap.set(d,x);}
   const chart=[...driverMap.entries()].map(([driver,v])=>({driver,stops:v.stops,hours:round(v.hours)})).sort((a,b)=>b.stops-a.stops);
-  return {standalone_mode:false,validation_results:[],kpis:{gps_vehicles:gpsVehicleCount,total_gps_stops:stops,avg_stops_per_vehicle:gpsVehicleCount?round(stops/gpsVehicleCount):0,avg_route_duration_hrs:hours.length?round(hours.reduce((a,b)=>a+b,0)/hours.length):null,avg_stop_duration:"",sap_orders:rows.length,sap_total_boxes:rows.reduce((n,r)=>n+r.boxes,0)},chart_stops:{labels:chart.map(x=>x.driver),values:chart.map(x=>x.stops)},chart_route_hours:{labels:chart.map(x=>x.driver),values:chart.map(x=>x.hours)},route_cards:cards};
+  return {standalone_mode:false,validation_results:[],kpis:{gps_vehicles:cards.length,total_gps_stops:stops,avg_stops_per_vehicle:cards.length?round(stops/cards.length):0,avg_route_duration_hrs:hours.length?round(hours.reduce((a,b)=>a+b,0)/hours.length):null,avg_stop_duration:"",sap_orders:rows.length,sap_total_boxes:rows.reduce((n,r)=>n+r.boxes,0)},chart_stops:{labels:chart.map(x=>x.driver),values:chart.map(x=>x.stops)},chart_route_hours:{labels:chart.map(x=>x.driver),values:chart.map(x=>x.hours)},route_cards:cards};
 }
 
 export function buildLocalForEndpoint(endpoint: string, dataset: DashboardLocalDataset, gf?: GlobalFilters): any {
   const rows=filterDashboardRows(dataset,gf); const e=endpoint.replace(/^\//,"");
-  if(e.includes("driver-performance")) return buildLocalDriverPerformance(rows,dataset.routeCards,gf,dataset.rows);
+  if(e.includes("driver-performance")) return buildLocalDriverPerformance(rows,dataset.routeCards,gf);
   if(e.includes("lead-time")) return buildLocalLeadTime(rows, gf);
   if(e.includes("order-summary")) return buildLocalOrderSummary(rows);
   if(e.includes("area-analytics")) return buildLocalArea(rows);
