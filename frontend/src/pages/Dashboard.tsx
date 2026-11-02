@@ -126,7 +126,10 @@ export default function Dashboard() {
   const preloadedRange = getPreloadedDashboardRange();
   const [dateFrom, setDateFrom] = useState(preloadedRange?.start || "");
   const [dateTo, setDateTo] = useState(preloadedRange?.end || "");
-  const [latestRangeReady, setLatestRangeReady] = useState(() => Boolean(preloadedRange?.start && preloadedRange?.end));
+  // Always verify the cached month against the live imported SAP data on each Dashboard mount.
+  // A cached September range must not suppress the latest-month lookup after October (or any
+  // future month) has been uploaded. The cached range remains a fast initial display only.
+  const [latestRangeReady, setLatestRangeReady] = useState(false);
   const [localDataset, setLocalDataset] = useState(() => getDashboardLocalDataset());
   const [initialLoadingProgress, setInitialLoadingProgress] = useState(() => getDashboardLocalLoadingProgress());
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
@@ -413,7 +416,12 @@ export default function Dashboard() {
       <DashboardTabs tabs={TABS} active={tab} onChange={selectTab} />
 
       {tab === "home" && <HomeTab driver={driver} onSelectDriver={(name) => { setDriver(name); setSelDrivers([]); }} onDriverListLoaded={setDriverList} globalFilters={globalFilters} />}
-      {tab === "driver-performance" && <DriverPerformanceTab driver={driver} globalFilters={globalFilters} />}
+      {/* Keep Driver Performance mounted with the Dashboard, just like the shared
+          dashboard dataset. Its local reconstruction and additive RPC hydration
+          must finish before the user opens the tab, rather than starting on click. */}
+      <div style={{ display: tab === "driver-performance" ? "block" : "none" }}>
+        <DriverPerformanceTab driver={driver} globalFilters={globalFilters} />
+      </div>
       {tab === "lead-time" && <LeadTimeTab driver={driver} globalFilters={globalFilters} setLeadTimeBand={setSelLeadTimeBand} setClassification={setSelClassification} />}
       {tab === "order-summary" && <OrderSummaryTab driver={driver} globalFilters={globalFilters} />}
       {tab === "area-analytics" && <AreaAnalyticsTab driver={driver} globalFilters={globalFilters} />}

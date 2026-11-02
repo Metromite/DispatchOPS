@@ -8,6 +8,33 @@ import {
   subscribeDashboardLocal,
 } from "../services/dashboardLocalStore";
 
+
+function readDriverPerformanceCache<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || Date.now() - Number(parsed.savedAt || 0) > 7 * 24 * 60 * 60 * 1000) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.value as T;
+  } catch { return null; }
+}
+
+function isFreshDriverPerformanceCache(key: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return !!parsed?.value && Date.now() - Number(parsed.savedAt || 0) < 30 * 60 * 1000;
+  } catch { return false; }
+}
+
+function writeDriverPerformanceCache<T>(key: string, value: T) {
+  try { window.localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value })); } catch { /* storage may be unavailable or full */ }
+}
+
 export function useDashboardLocalData<T>(endpoint: string, globalFilters?: GlobalFilters, driver = ""): { data: T | null; error: string } {
   const baseFilters = globalFilters || EMPTY_GLOBAL_FILTERS;
   const gf = useMemo<GlobalFilters>(() => {
@@ -36,15 +63,35 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
   // dashboard and NOT used by any other tab, so normal local/offline behavior
   // remains unchanged. The request is guarded by a key so stale responses can
   // never replace a newer driver selection.
-  const [driverFallback, setDriverFallback] = useState<T | null>(null);
-  const driverFallbackSeq = useRef(0);
   const selectedDriverKey = String(gf.drivers || driver || "").trim();
+  const driverPerformanceCacheKey = useMemo(() => {
+    if (!endpoint.includes("driver-performance")) return "";
+    const cacheFilters = {
+      endpoint, driver: selectedDriverKey,
+      start: gf.start_date || "", end: gf.end_date || "",
+      drivers: gf.drivers || "", areas: gf.areas || "", division: gf.division || "",
+      route_type: gf.route_type || "", vehicle_type: gf.vehicle_type || "",
+      facility_type: gf.facility_type || "", salesman: gf.salesman || "",
+      lead_time_band: gf.lead_time_band || "", classification: gf.classification || "",
+    };
+    return `dispatchops:driver-performance:v1:${encodeURIComponent(JSON.stringify(cacheFilters))}`;
+  }, [endpoint, selectedDriverKey, gf.start_date, gf.end_date, gf.drivers, gf.areas, gf.division, gf.route_type, gf.vehicle_type, gf.facility_type, gf.salesman, gf.lead_time_band, gf.classification]);
+  const [driverFallback, setDriverFallback] = useState<T | null>(() => driverPerformanceCacheKey ? readDriverPerformanceCache<T>(driverPerformanceCacheKey) : null);
+  const driverFallbackSeq = useRef(0);
+  const updateDriverFallback = (value: T | null) => {
+    setDriverFallback(value);
+    if (value && driverPerformanceCacheKey) writeDriverPerformanceCache(driverPerformanceCacheKey, value);
+  };
+  useEffect(() => {
+    if (driverPerformanceCacheKey) setDriverFallback(readDriverPerformanceCache<T>(driverPerformanceCacheKey));
+    else setDriverFallback(null);
+  }, [driverPerformanceCacheKey]);
   const selectedDriverKeys = selectedDriverKey.split(",").map((x) => x.trim()).filter(Boolean);
   const localDriverIsEmpty = endpoint.includes("driver-performance") && !!selectedDriverKey && !!data && Number((data as any)?.kpis?.gps_vehicles || 0) === 0 && Array.isArray((data as any)?.route_cards) && (data as any).route_cards.length === 0;
 
   useEffect(() => {
     if (!endpoint.includes("driver-performance")) {
-      setDriverFallback(null);
+      updateDriverFallback(null);
       return;
     }
 
@@ -58,7 +105,7 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
     // the endpoint.
     if (!selectedDriverKey) {
       if (!data || !dataset || dataset.key !== "ALL") {
-        setDriverFallback(null);
+        updateDriverFallback(null);
         return;
       }
 
@@ -87,9 +134,13 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
       const missingDrivers = roster.filter((driverName) => !present.has(normalize(driverName)));
 
       if (!missingDrivers.length) {
-        setDriverFallback(null);
+        updateDriverFallback(null);
         return;
       }
+      // A recent browser snapshot already contains the hydrated Driver Performance
+      // result. Reuse it instead of repeating the same federated requests whenever
+      // the user leaves and reopens this tab.
+      if (driverPerformanceCacheKey && isFreshDriverPerformanceCache(driverPerformanceCacheKey)) return;
 
       const loadOne = async (wanted: string) => {
         const params = new URLSearchParams();
@@ -115,6 +166,7 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
 
         const remoteStops: { labels: string[]; values: number[] } = { labels: [], values: [] };
         const remoteHours: { labels: string[]; values: number[] } = { labels: [], values: [] };
+        const remoteCards: any[] = [];
         for (const remote of remotes) {
           if (!remote) continue;
           const stops = (remote as any)?.chart_stops;
@@ -127,6 +179,7 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
             remoteHours.labels.push(...hours.labels);
             remoteHours.values.push(...(Array.isArray(hours.values) ? hours.values : []));
           }
+          if (Array.isArray((remote as any)?.route_cards)) remoteCards.push(...(remote as any).route_cards);
         }
 
         const mergeChart = (local: any, remoteChart: any) => {
@@ -144,18 +197,62 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
           return { labels, values };
         };
 
-        const mergedStops = mergeChart(localStops, remoteStops);
-        const mergedHours = mergeChart(localHours, remoteHours);
-        if (mergedStops.labels.length <= localStops.labels.length && mergedHours.labels.length <= localHours.labels.length) {
-          setDriverFallback(null);
+        // The previous fallback enriched chart labels only, leaving KPI tiles
+        // and Route Detail empty even when the same remote driver RPC returned
+        // real route cards. Merge those cards into the canonical result so all
+        // four KPI tiles, both charts and the detail table describe one dataset.
+        const localCards = Array.isArray((data as any)?.route_cards) ? (data as any).route_cards : [];
+        const routeKey = (card: any) => `${normalize(card?.vehicle_key || card?.vehicle_num)}::${String(card?.route_start || card?.route_end || "").slice(0, 10)}::${normalize(card?.display_driver || card?.driver_name)}`;
+        const mergedCards = [...localCards];
+        const seenCards = new Set(localCards.map(routeKey));
+        for (const card of remoteCards) {
+          const key = routeKey(card);
+          if (key.replace(/:/g, "") && !seenCards.has(key)) {
+            seenCards.add(key);
+            mergedCards.push(card);
+          }
+        }
+
+        if (mergedCards.length > localCards.length) {
+          const stopsTotal = mergedCards.reduce((sum, card) => sum + Number(card?.stops || 0), 0);
+          const gpsVehicles = new Set(mergedCards.map((card) => normalize(card?.vehicle_key || card?.vehicle_num)).filter(Boolean)).size;
+          const routeHours = mergedCards.map((card) => {
+            const m = String(card?.route_duration_hm || "").match(/(\d+)h\s+(\d+)m/);
+            return m ? Number(m[1]) + Number(m[2]) / 60 : 0;
+          }).filter((value) => value > 0);
+          const byDriver = new Map<string, { stops: number; hours: number }>();
+          for (const card of mergedCards) {
+            const name = String(card?.display_driver || card?.driver_name || "Unknown").trim() || "Unknown";
+            const item = byDriver.get(name) || { stops: 0, hours: 0 };
+            item.stops += Number(card?.stops || 0);
+            const m = String(card?.route_duration_hm || "").match(/(\d+)h\s+(\d+)m/);
+            if (m) item.hours += Number(m[1]) + Number(m[2]) / 60;
+            byDriver.set(name, item);
+          }
+          const chartRows = [...byDriver.entries()].map(([name, value]) => ({ name, ...value })).sort((x, y) => y.stops - x.stops);
+          updateDriverFallback({
+            ...(data as any),
+            route_cards: mergedCards,
+            kpis: {
+              ...(data as any).kpis,
+              gps_vehicles: gpsVehicles,
+              total_gps_stops: stopsTotal,
+              avg_stops_per_vehicle: gpsVehicles ? Math.round(stopsTotal / gpsVehicles * 100) / 100 : 0,
+              avg_route_duration_hrs: routeHours.length ? Math.round(routeHours.reduce((sum, value) => sum + value, 0) / routeHours.length * 100) / 100 : null,
+            },
+            chart_stops: { labels: chartRows.map((row) => row.name), values: chartRows.map((row) => row.stops) },
+            chart_route_hours: { labels: chartRows.map((row) => row.name), values: chartRows.map((row) => row.hours) },
+          } as T);
           return;
         }
 
-        setDriverFallback({
-          ...(data as any),
-          chart_stops: mergedStops,
-          chart_route_hours: mergedHours,
-        } as T);
+        const mergedStops = mergeChart(localStops, remoteStops);
+        const mergedHours = mergeChart(localHours, remoteHours);
+        if (mergedStops.labels.length <= localStops.labels.length && mergedHours.labels.length <= localHours.labels.length) {
+          updateDriverFallback(null);
+          return;
+        }
+        updateDriverFallback({ ...(data as any), chart_stops: mergedStops, chart_route_hours: mergedHours } as T);
       });
       return () => {
         if (seq === driverFallbackSeq.current) driverFallbackSeq.current += 1;
@@ -191,16 +288,17 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
     // only request the missing drivers individually. This keeps the fast local
     // path intact and makes the fallback additive rather than destructive.
     if (!localDriverIsEmpty && selectedDriverKeys.length === 1 && missingDrivers.length === 0) {
-      setDriverFallback(null);
+      updateDriverFallback(null);
       return;
     }
     if (!localDriverIsEmpty && selectedDriverKeys.length === 1 && missingDrivers.length === 1) {
       // handled below as one additive card set; do not use the old whole-result replacement.
     }
     if (!missingDrivers.length) {
-      setDriverFallback(null);
+      updateDriverFallback(null);
       return;
     }
+    if (driverPerformanceCacheKey && isFreshDriverPerformanceCache(driverPerformanceCacheKey)) return;
 
     const loadOne = async (wanted: string) => {
       const params = new URLSearchParams();
@@ -225,7 +323,7 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
       if (seq !== driverFallbackSeq.current) return;
       const valid = remotes.filter((remote) => !!remote && (Number((remote as any)?.kpis?.gps_vehicles || 0) > 0 || (Array.isArray((remote as any)?.route_cards) && (remote as any).route_cards.length > 0)));
       if (!valid.length) {
-        setDriverFallback(null);
+        updateDriverFallback(null);
         return;
       }
 
@@ -272,13 +370,13 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
       base.kpis = { ...(base.kpis || {}), gps_vehicles: gpsVehicles, total_gps_stops: stops, avg_stops_per_vehicle: gpsVehicles ? Math.round((stops / gpsVehicles) * 100) / 100 : 0, avg_route_duration_hrs: hours.length ? Math.round((hours.reduce((a, b) => a + b, 0) / hours.length) * 100) / 100 : null };
       base.chart_stops = { labels: chartRows.map((row) => row.driver), values: chartRows.map((row) => row.stops) };
       base.chart_route_hours = { labels: chartRows.map((row) => row.driver), values: chartRows.map((row) => row.hours) };
-      setDriverFallback(base as T);
+      updateDriverFallback(base as T);
     });
 
     return () => {
       if (seq === driverFallbackSeq.current) driverFallbackSeq.current += 1;
     };
-  }, [endpoint, selectedDriverKey, localDriverIsEmpty, gf.start_date, gf.end_date, gf.areas, gf.division, gf.route_type, gf.vehicle_type, gf.facility_type, gf.salesman, data]);
+  }, [endpoint, selectedDriverKey, localDriverIsEmpty, gf.start_date, gf.end_date, gf.areas, gf.division, gf.route_type, gf.vehicle_type, gf.facility_type, gf.salesman, data, driverPerformanceCacheKey]);
 
   return { data: (driverFallback || data), error: "" };
 }
