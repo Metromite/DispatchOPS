@@ -239,11 +239,34 @@ function parseLandmarkFacts(grid: unknown[][], batchId: string, filename: string
   return facts;
 }
 
-async function insertChunks(table: string, rows: JsonRow[], client = supabase, chunkSize = 400): Promise<void> {
+async function insertChunks(
+  table: string, rows: JsonRow[], client = supabase, chunkSize = 100,
+  onProgress?: (saved: number, total: number) => void,
+): Promise<number> {
+  let saved = 0;
+  // Landmark has several dashboard indexes. Large concurrent inserts overload
+  // the project and hit the 3s PostgREST statement timeout, so keep fact writes
+  // small and sequential, retrying only transient timeout/network failures.
   for (let i = 0; i < rows.length; i += chunkSize) {
-    const { error } = await client.from(table).insert(rows.slice(i, i + chunkSize));
-    if (error) throw new Error(`${table}: ${error.message}`);
+    const chunk = rows.slice(i, i + chunkSize);
+    let data: any[] | null = null;
+    let error: any = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const result = await client.from(table).insert(chunk).select("id");
+      data = result.data as any[] | null;
+      error = result.error;
+      if (!error) break;
+      if (!/statement timeout|canceling statement due to statement timeout/i.test(error.message || "") || attempt === 3) break;
+      await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+    if (error) throw new Error(`${table} rows ${i + 1}-${i + chunk.length}: ${error.message}`);
+    if ((data?.length ?? 0) !== chunk.length) {
+      throw new Error(`${table} chunk verification mismatch: expected ${chunk.length} returned IDs, received ${data?.length ?? 0}.`);
+    }
+    saved += data!.length;
+    onProgress?.(saved, rows.length);
   }
+  return saved;
 }
 
 async function updateLearnedValues(rows: JsonRow[], client = supabase): Promise<void> {
@@ -599,6 +622,9 @@ export async function processImportFile(
 ): Promise<ImportBatch> {
   const progress = (patch: Partial<ImportProgress>) => onProgress?.({ status: "processing", progress_pct: 0, current_step: "", processed_units: 0, total_units: 0, estimated_seconds_remaining: 0, log: "", error: "", ...patch });
   let batch: ImportBatch | null = null;
+  let rawSaved = 0;
+  let factsSaved = 0;
+  let parsedFactsTotal = 0;
   try {
     progress({ current_step: "Uploading original source file", progress_pct: 5 });
     batch = await startImportBatch(file, { source_type: sourceType, imported_by_device: navigator.userAgent });
@@ -615,13 +641,15 @@ export async function processImportFile(
     await insertRawImportRows(
       rows.map((row, index) => ({ source_type: sourceType, batch_id: batch!.id, source_filename: file.name, row_index: index, row_json: row, imported_by: "", label: "" })),
       importClient,
-      (processed, total) => progress({ current_step: `Saving raw audit rows (${processed.toLocaleString()}/${total.toLocaleString()})`, processed_units: processed, total_units: total, progress_pct: 25 + Math.round((processed / Math.max(total, 1)) * 20) })
+      (processed, total) => { rawSaved = processed; progress({ current_step: `Saving raw audit rows (${processed.toLocaleString()}/${total.toLocaleString()})`, processed_units: processed, total_units: total, progress_pct: 25 + Math.round((processed / Math.max(total, 1)) * 20) }); }
     );
     let facts: JsonRow[] = [], rejected: string[] = [];
+    parsedFactsTotal = facts.length;
     if (sourceType === "sap") {
       ({ facts, rejected } = parseSapFacts(rows, batch.id, file.name));
+      parsedFactsTotal = facts.length;
       progress({ current_step: "Saving SAP invoice facts", processed_units: rows.length, total_units: rows.length, progress_pct: 55 });
-      await insertChunks("sap_invoice_facts", facts, importClient);
+      factsSaved = await insertChunks("sap_invoice_facts", facts, importClient, 100, (saved, total) => { factsSaved = saved; progress({ current_step: `Saving SAP invoice facts (${saved.toLocaleString()}/${total.toLocaleString()})`, processed_units: saved, total_units: total, progress_pct: 55 + Math.round((saved / Math.max(total, 1)) * 30) }); });
       await updateLearnedValues(rows, importClient);
       // Experience is intentionally independent from the normal SAP Dashboard import.
       // Only the dedicated Experience upload is allowed to write experience_history.
@@ -629,19 +657,30 @@ export async function processImportFile(
     } else {
       facts = parseLandmarkFacts(firstSheetGrid(workbook), batch.id, file.name);
       progress({ current_step: "Saving V-Zone / Landmark visit facts", processed_units: rows.length, total_units: rows.length, progress_pct: 60 });
-      await insertChunks("landmark_visit_facts", facts, importClient);
+      parsedFactsTotal = facts.length;
+      factsSaved = await insertChunks("landmark_visit_facts", facts, importClient, 100, (saved, total) => { factsSaved = saved; progress({ current_step: `Saving V-Zone / Landmark visit facts (${saved.toLocaleString()}/${total.toLocaleString()})`, processed_units: saved, total_units: total, progress_pct: 60 + Math.round((saved / Math.max(total, 1)) * 28) }); });
+    }
+    // Verify each inserted chunk from the IDs returned by PostgREST.
+    // Avoid COUNT EXACT over raw_import_rows: that table is large and has no
+    // batch_id index, so a full count can hit the database statement timeout.
+    progress({ current_step: "Verifying saved import records", processed_units: rows.length, total_units: rows.length, progress_pct: 88 });
+    if (rawSaved !== rows.length || factsSaved !== facts.length) {
+      throw new Error(`Import verification mismatch. Expected ${rows.length} raw rows and ${facts.length} parsed facts, but confirmed ${rawSaved} raw rows and ${factsSaved} parsed facts. The batch was not marked completed.`);
     }
     const failed = rejected.length;
     const finished = await finalizeImportBatch(batch.id, { row_count: rows.length, success_count: facts.length, failed_count: failed, validation_errors: rejected.slice(0, 200) });
-    // The dashboard's IndexedDB snapshot must not hide a newly imported month.
+    // Clear both the local IndexedDB snapshot and in-memory analytics results;
+    // otherwise Driver Performance can keep serving the pre-import month.
     await invalidateDashboardLocalDataset();
+    const analytics = await import("./dashboardAnalytics");
+    analytics.invalidateDashboardAnalyticsCache();
     progress({ status: failed ? "partial" : "completed", current_step: "Import complete", progress_pct: 100, processed_units: rows.length, total_units: rows.length, log: `${facts.length} parsed facts stored. Original file retained in Supabase Storage.` });
     return finished;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (batch) {
       const ownerClient = getSupabaseClientByProject((batch.storage_project as any) || "primary");
-      await ownerClient.from("import_batches").update({ status: "failed", validation_errors: [message] }).eq("id", batch.id);
+      await ownerClient.from("import_batches").update({ status: "failed", error_message: message, row_count: rawSaved, success_count: factsSaved, failed_count: Math.max(0, parsedFactsTotal - factsSaved), validation_errors: [message] }).eq("id", batch.id);
     }
     progress({ status: "failed", current_step: "Import failed", error: message });
     throw error;
@@ -657,20 +696,20 @@ export async function getImportBatchesForUi() {
     const { data, error } = await client.from("import_batches").select("*").is("deleted_at", null).order("imported_at", { ascending: false });
     if (error) throw new Error(error.message);
     for (const b of data || []) {
-      const table = b.source_type === "sap" ? "sap_invoice_facts" : "landmark_visit_facts";
-      const [{ count: rawCount }, { count: factCount }] = await Promise.all([
-        client.from("raw_import_rows").select("id", { count: "exact", head: true }).eq("batch_id", b.id),
-        client.from(table).select("id", { count: "exact", head: true }).eq("batch_id", b.id),
-      ]);
+      // Use the acknowledged counts stored with the batch. COUNT EXACT on
+      // batch_id forces full scans on these large unindexed tables and was
+      // incorrectly labelling healthy historical imports as verification-failed.
+      const rawCount = Number(b.row_count || 0);
+      const factCount = Number(b.success_count || 0);
+      const countsAvailable = !(b.status === "failed" && rawCount === 0 && factCount === 0);
       all.push({
         batch_id: b.id, source_type: b.source_type, filename: b.original_filename || b.file_name || "",
         imported_by: b.imported_by || "", label: b.label || "", imported_at: b.imported_at || b.created_at,
-        // The batch metadata is the authoritative persisted count. The direct COUNT query can
-        // legitimately return 0 when a client cannot see the child rows even though the import
-        // completed successfully, so never display a false zero when the batch recorded rows.
-        raw_row_count: Math.max(Number(rawCount || 0), Number(b.row_count || 0)),
-        parsed_fact_count: Math.max(Number(factCount || 0), Number(b.success_count || 0)),
+        raw_row_count: countsAvailable ? rawCount : null, parsed_fact_count: countsAvailable ? factCount : null,
+        reported_raw_row_count: rawCount, reported_fact_count: factCount,
+        verification_error: "", count_mismatch: false,
         status: b.status, error_message: b.error_message || "", storage_project: projectNames[i],
+        file_size_bytes: b.file_size_bytes == null ? null : Number(b.file_size_bytes),
       });
     }
   }
@@ -681,9 +720,9 @@ export async function getImportBatchRows(batchId: string, limit = 25) {
   let owner: any = null;
   for (const c of getFederatedSupabaseClients()) { const r = await c.from("import_batches").select("storage_project").eq("id", batchId).maybeSingle(); if (r.error) throw new Error(r.error.message); if (r.data) { owner = r.data; break; } }
   const client = getSupabaseClientByProject(owner?.storage_project === "secondary" ? "secondary" : owner?.storage_project === "tertiary" ? "tertiary" : "primary");
-  const { data, error, count } = await client.from("raw_import_rows").select("row_index,row_json", { count: "exact" }).eq("batch_id", batchId).order("row_index").limit(limit);
+  const { data, error } = await client.from("raw_import_rows").select("row_index,row_json").eq("batch_id", batchId).limit(limit);
   if (error) throw new Error(error.message);
-  return { total: count || 0, limit, offset: 0, rows: (data || []).map((r) => ({ row_index: r.row_index, data: JSON.stringify(r.row_json) })) };
+  return { total: data?.length || 0, limit, offset: 0, rows: (data || []).map((r) => ({ row_index: r.row_index, data: JSON.stringify(r.row_json) })) };
 }
 
 export async function labelImportBatch(batchId: string, label: string) {
@@ -695,7 +734,17 @@ export async function labelImportBatch(batchId: string, label: string) {
   await client.from("raw_import_rows").update({ label }).eq("batch_id", batchId);
 }
 
-export async function deleteImportedData(batchId: string) {
+export interface ImportDeleteProgress { progress_pct: number; current_step: string; removed_rows: number; }
+
+export async function deleteImportedData(
+  batchId: string,
+  onProgress?: (progress: ImportDeleteProgress) => void,
+) {
+  let removedRows = 0;
+  const report = (progress_pct: number, current_step: string) =>
+    onProgress?.({ progress_pct, current_step, removed_rows: removedRows });
+
+  report(3, "Locating the batch and its database…");
   let batch: any = null;
   for (const c of getFederatedSupabaseClients()) {
     const r = await c.from("import_batches").select("storage_project,storage_bucket,storage_path").eq("id", batchId).maybeSingle();
@@ -705,33 +754,54 @@ export async function deleteImportedData(batchId: string) {
   if (!batch) throw new Error("Import batch not found");
   const client = getSupabaseClientByProject(batch.storage_project === "secondary" ? "secondary" : batch.storage_project === "tertiary" ? "tertiary" : "primary");
 
-  // Delete child facts in small, bounded transactions. A single DELETE over
-  // 80k+ Landmark rows can exceed Supabase's statement timeout; deleting by
-  // selected primary keys in batches avoids changing schema or timeout settings.
-  const deleteBatchRows = async (table: "sap_invoice_facts" | "landmark_visit_facts" | "raw_import_rows") => {
+  const deleteByBatchColumn = async (
+    table: "sap_invoice_facts" | "landmark_visit_facts" | "raw_import_rows",
+    column: "batch_id" | "import_batch_id",
+    label: string,
+    startPct: number,
+    endPct: number,
+  ) => {
     const CHUNK = 250;
+    let chunks = 0;
+    // Keyset pagination is important here: batch_id may not be indexed in an
+    // existing deployment. Repeating LIMIT from the beginning forces the DB
+    // to rescan the same raw rows on every chunk and eventually times out.
+    // The primary-key id index lets each next page continue after the last id.
+    let lastSeenId: string | null = null;
     while (true) {
-      const { data: ids, error: readError } = await client.from(table)
-        .select("id").eq("batch_id", batchId).limit(CHUNK);
-      if (readError) throw new Error(`${table}: ${readError.message}`);
+      report(Math.min(endPct - 1, startPct + Math.min(8, chunks)), `${label} · ${chunks} batches processed`);
+      let query = client.from(table).select("id").eq(column, batchId).order("id", { ascending: true }).limit(CHUNK);
+      if (lastSeenId) query = query.gt("id", lastSeenId);
+      const { data: ids, error: readError } = await query;
+      if (readError) throw new Error(`${table}.${column}: ${readError.message}`);
       const keys = (ids || []).map((row: any) => row.id).filter(Boolean);
       if (!keys.length) break;
-      const { data: removed, error: deleteError } = await client.from(table)
-        .delete().in("id", keys).select("id");
+      const { data: removed, error: deleteError } = await client.from(table).delete().in("id", keys).select("id");
       if (deleteError) throw new Error(`${table}: ${deleteError.message}`);
       if (!removed?.length) throw new Error(`${table}: deletion made no progress; remaining rows were left untouched.`);
+      lastSeenId = String(keys[keys.length - 1]);
+      removedRows += removed.length;
+      chunks += 1;
+      report(Math.min(endPct - 1, startPct + Math.min(8, chunks)), `${label} · ${removedRows.toLocaleString()} rows removed`);
     }
+    report(endPct, `${label} completed`);
   };
 
-  await deleteBatchRows("sap_invoice_facts");
-  await deleteBatchRows("landmark_visit_facts");
-  await deleteBatchRows("raw_import_rows");
+  await deleteByBatchColumn("sap_invoice_facts", "batch_id", "Deleting SAP facts", 8, 28);
+  await deleteByBatchColumn("landmark_visit_facts", "batch_id", "Deleting Landmark facts", 28, 48);
+  await deleteByBatchColumn("landmark_visit_facts", "import_batch_id", "Checking legacy Landmark facts", 48, 58);
+  await deleteByBatchColumn("raw_import_rows", "batch_id", "Deleting original raw rows", 58, 86);
 
+  report(90, "Deleting the original uploaded file…");
   if (batch.storage_path) {
     const { error: storageError } = await client.storage.from(batch.storage_bucket || "dispatchops-files").remove([batch.storage_path]);
     if (storageError) throw new Error(`Storage: ${storageError.message}`);
   }
-  const { error } = await client.from("import_batches").delete().eq("id", batchId);
+  report(96, "Removing the import batch record…");
+  const { data: deleted, error } = await client.from("import_batches").delete().eq("id", batchId).select("id");
   if (error) throw new Error(error.message);
+  if (!deleted?.length) throw new Error("Import batch metadata was not deleted. Refresh and retry; remaining records were not hidden.");
   await invalidateDashboardLocalDataset();
+  report(100, "Deletion completed successfully");
+  return { removedRows };
 }

@@ -73,9 +73,12 @@ export function useDashboardLocalData<T>(endpoint: string, globalFilters?: Globa
       route_type: gf.route_type || "", vehicle_type: gf.vehicle_type || "",
       facility_type: gf.facility_type || "", salesman: gf.salesman || "",
       lead_time_band: gf.lead_time_band || "", classification: gf.classification || "",
+      dataset_loaded_at: dataset?.loadedAt || 0,
     };
-    return `dispatchops:driver-performance:v1:${encodeURIComponent(JSON.stringify(cacheFilters))}`;
-  }, [endpoint, selectedDriverKey, gf.start_date, gf.end_date, gf.drivers, gf.areas, gf.division, gf.route_type, gf.vehicle_type, gf.facility_type, gf.salesman, gf.lead_time_band, gf.classification]);
+    // A new live dataset load gets a new loadedAt value. Including it prevents
+    // a 30-minute cached zero from masking newly imported October records.
+    return `dispatchops:driver-performance:v2:${encodeURIComponent(JSON.stringify(cacheFilters))}`;
+  }, [endpoint, selectedDriverKey, dataset?.loadedAt, gf.start_date, gf.end_date, gf.drivers, gf.areas, gf.division, gf.route_type, gf.vehicle_type, gf.facility_type, gf.salesman, gf.lead_time_band, gf.classification]);
   const [driverFallback, setDriverFallback] = useState<T | null>(() => driverPerformanceCacheKey ? readDriverPerformanceCache<T>(driverPerformanceCacheKey) : null);
   const driverFallbackSeq = useRef(0);
   const updateDriverFallback = (value: T | null) => {
